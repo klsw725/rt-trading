@@ -1,0 +1,42 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# OS files
+.DS_Store
+
+# Data files (user-specific)
+data/snapshots/
+data/prompt_tuning/
+data/portfolio.json
+data/fundamentals_cache.json
+data/web_cache.json
+data/sector_cache.json
+data/fx_beta_cache.json
+data/krx_listing_cache.csv
+
+# 저작권 참고자료 (절대 커밋 금지)
+docs/refs/
+
+# 로컬 작업 이력 (절대 커밋 금지)
+docs/*.md
+
+# Agent work dirs
+.sisyphus/
+.omc/
+.omo/
+data/macro_series.parquet
+data/causal_graph_verified.json
+data/node_series_map.json
+
+# 개인정보
+config.yaml
+.env
+.env/
