@@ -1,0 +1,99 @@
+{
+  "description": "PRD 01 acceptance용 가상 토스 응답과 손으로 계산한 기대값. 실제 시세가 아니다. 실행일은 2026-10-22, 수집 시작일은 2022-11-23이다.",
+  "credentials": ["tsck_live_FAKE_CLIENT_ID", "FAKE_CLIENT_SECRET"],
+  "token": {"access_token": "FAKE_ACCESS_TOKEN", "token_type": "Bearer", "expires_in": 86399},
+  "now": "2026-10-22T16:05:00+09:00",
+  "candles": {
+    "069500 1m false": [
+      {"result": {"candles": [
+        {"timestamp": "2026-10-22T09:02:00.000+09:00", "openPrice": "105", "highPrice": "106", "lowPrice": "104", "closePrice": "106", "volume": "70", "currency": "KRW"},
+        {"timestamp": "2026-10-22T09:01:00.000+09:00", "openPrice": "104", "highPrice": "105", "lowPrice": "104", "closePrice": "105", "volume": "90", "currency": "KRW"},
+        {"timestamp": "2026-10-21T15:30:00.000+09:00", "openPrice": "103", "highPrice": "104", "lowPrice": "103", "closePrice": "104", "volume": "500", "currency": "KRW"},
+        {"timestamp": "2026-10-21T09:01:00.000+09:00", "openPrice": "101", "highPrice": "102", "lowPrice": "100", "closePrice": "102", "volume": "1000", "currency": "KRW"}
+      ], "nextBefore": "2026-10-20T15:30:00.000+09:00"}},
+      {"result": {"candles": [
+        {"timestamp": "2026-10-20T15:30:00.000+09:00", "openPrice": "100", "highPrice": "101", "lowPrice": "99", "closePrice": "101", "volume": "300", "currency": "KRW"},
+        {"timestamp": "2022-11-23T09:01:00.000+09:00", "openPrice": "90", "highPrice": "91", "lowPrice": "89", "closePrice": "90", "volume": "200", "currency": "KRW"}
+      ], "nextBefore": "2022-11-22T15:30:00.000+09:00"}},
+      {"result": {"candles": [
+        {"timestamp": "2022-11-22T15:30:00.000+09:00", "openPrice": "89", "highPrice": "90", "lowPrice": "88", "closePrice": "89", "volume": "150", "currency": "KRW"}
+      ], "nextBefore": "2022-11-22T15:29:00.000+09:00"}}
+    ],
+    "114800 1m false": [
+      {"result": {"candles": [
+        {"timestamp": "2026-10-21T09:01:00.000+09:00", "openPrice": "1200", "highPrice": "1201", "lowPrice": "1199", "closePrice": "1201", "volume": "7000", "currency": "KRW"},
+        {"timestamp": "2022-11-23T09:01:00.000+09:00", "openPrice": "4800", "highPrice": "4805", "lowPrice": "4795", "closePrice": "4800", "volume": "9000", "currency": "KRW"}
+      ], "nextBefore": null}}
+    ],
+    "069500 1d false": [
+      {"result": {"candles": [
+        {"timestamp": "2026-10-22T00:00:00.000+09:00", "openPrice": "104", "highPrice": "106", "lowPrice": "104", "closePrice": "106", "volume": "160", "currency": "KRW"},
+        {"timestamp": "2026-10-21T00:00:00.000+09:00", "openPrice": "101", "highPrice": "104", "lowPrice": "100", "closePrice": "104", "volume": "1500", "currency": "KRW"},
+        {"timestamp": "2026-10-20T00:00:00.000+09:00", "openPrice": "99", "highPrice": "101", "lowPrice": "98", "closePrice": "101", "volume": "800", "currency": "KRW"},
+        {"timestamp": "2022-11-23T00:00:00.000+09:00", "openPrice": "90", "highPrice": "91", "lowPrice": "89", "closePrice": "90", "volume": "200", "currency": "KRW"},
+        {"timestamp": "2022-11-22T00:00:00.000+09:00", "openPrice": "88", "highPrice": "90", "lowPrice": "88", "closePrice": "89", "volume": "150", "currency": "KRW"}
+      ], "nextBefore": "2022-11-21T00:00:00.000+09:00"}}
+    ],
+    "069500 1d true": [
+      {"result": {"candles": [
+        {"timestamp": "2026-10-22T00:00:00.000+09:00", "openPrice": "104", "highPrice": "106", "lowPrice": "104", "closePrice": "106", "volume": "160", "currency": "KRW"},
+        {"timestamp": "2026-10-21T00:00:00.000+09:00", "openPrice": "101", "highPrice": "104", "lowPrice": "100", "closePrice": "104", "volume": "1500", "currency": "KRW"},
+        {"timestamp": "2026-10-20T00:00:00.000+09:00", "openPrice": "99", "highPrice": "101", "lowPrice": "98", "closePrice": "101", "volume": "800", "currency": "KRW"},
+        {"timestamp": "2022-11-23T00:00:00.000+09:00", "openPrice": "81", "highPrice": "82", "lowPrice": "80", "closePrice": "81", "volume": "200", "currency": "KRW"},
+        {"timestamp": "2022-11-22T00:00:00.000+09:00", "openPrice": "79", "highPrice": "81", "lowPrice": "79", "closePrice": "80", "volume": "150", "currency": "KRW"}
+      ], "nextBefore": "2022-11-21T00:00:00.000+09:00"}}
+    ],
+    "114800 1d false": [
+      {"result": {"candles": [
+        {"timestamp": "2026-10-21T00:00:00.000+09:00", "openPrice": "1200", "highPrice": "1202", "lowPrice": "1190", "closePrice": "1201", "volume": "7000", "currency": "KRW"},
+        {"timestamp": "2022-11-23T00:00:00.000+09:00", "openPrice": "4800", "highPrice": "4810", "lowPrice": "4790", "closePrice": "4800", "volume": "9000", "currency": "KRW"}
+      ], "nextBefore": null}}
+    ],
+    "114800 1d true": [
+      {"result": {"candles": [
+        {"timestamp": "2026-10-21T00:00:00.000+09:00", "openPrice": "1200", "highPrice": "1202", "lowPrice": "1190", "closePrice": "1201", "volume": "7000", "currency": "KRW"},
+        {"timestamp": "2022-11-23T00:00:00.000+09:00", "openPrice": "4788", "highPrice": "4798", "lowPrice": "4778", "closePrice": "4790", "volume": "9000", "currency": "KRW"}
+      ], "nextBefore": null}}
+    ]
+  },
+  "errors": {
+    "token_revoked": {"status": 401, "body": {"error": {"code": "token-revoked", "message": "폐기된 토큰", "requestId": "req-revoked"}}},
+    "token_invalid": {"status": 401, "body": {"error": {"code": "invalid-token", "message": "잘못된 토큰", "requestId": "req-invalid"}}},
+    "ip_oauth2": {"status": 403, "body": {"error": "access_denied", "error_description": "IP address not allowed"}},
+    "ip_candles": {"status": 403, "body": {"error": {"code": "ip-not-allowed", "message": "허용되지 않은 IP", "requestId": "req-ip"}}},
+    "rate_limited": {"status": 429, "headers": {"Retry-After": "3"}, "body": {"error": {"code": "too-many-requests", "requestId": "req-429"}}},
+    "unavailable": {"status": 503, "body": {"error": {"code": "service-unavailable", "requestId": "req-503"}}},
+    "no_result": {"status": 200, "body": {"candles": []}},
+    "bad_price": {"status": 200, "body": {"result": {"candles": [
+      {"timestamp": "2026-10-21T09:01:00.000+09:00", "openPrice": "abc", "highPrice": "1201", "lowPrice": "1199", "closePrice": "1201", "volume": "7000", "currency": "KRW"}
+    ], "nextBefore": null}}}
+  },
+  "expected": {
+    "candles_1m": [
+      ["069500", "2022-11-23 09:01", 90, 91, 89, 90, 200],
+      ["069500", "2026-10-20 15:30", 100, 101, 99, 101, 300],
+      ["069500", "2026-10-21 09:01", 101, 102, 100, 102, 1000],
+      ["069500", "2026-10-21 15:30", 103, 104, 103, 104, 500],
+      ["114800", "2022-11-23 09:01", 4800, 4805, 4795, 4800, 9000],
+      ["114800", "2026-10-21 09:01", 1200, 1201, 1199, 1201, 7000]
+    ],
+    "candles_1d": [
+      ["069500", "2022-11-23", 90, 91, 89, 90, 200, 81],
+      ["069500", "2026-10-20", 99, 101, 98, 101, 800, 101],
+      ["069500", "2026-10-21", 101, 104, 100, 104, 1500, 104],
+      ["114800", "2022-11-23", 4800, 4810, 4790, 4800, 9000, 4790],
+      ["114800", "2026-10-21", 1200, 1202, 1190, 1201, 7000, 1201]
+    ],
+    "fetch_runs": [
+      ["2026-10-22T16:05:00+09:00", "069500", "1d", "2022-11-23", "2026-10-21", 3],
+      ["2026-10-22T16:05:00+09:00", "069500", "1m", "2022-11-23", "2026-10-21", 4],
+      ["2026-10-22T16:05:00+09:00", "114800", "1d", "2022-11-23", "2026-10-21", 2],
+      ["2026-10-22T16:05:00+09:00", "114800", "1m", "2022-11-23", "2026-10-21", 2]
+    ],
+    "schema": {
+      "candles_1m": [["symbol", "TEXT", 1, 1], ["time", "TEXT", 1, 2], ["open", "INTEGER", 1, 0], ["high", "INTEGER", 1, 0], ["low", "INTEGER", 1, 0], ["close", "INTEGER", 1, 0], ["volume", "INTEGER", 1, 0]],
+      "candles_1d": [["symbol", "TEXT", 1, 1], ["date", "TEXT", 1, 2], ["open", "INTEGER", 1, 0], ["high", "INTEGER", 1, 0], ["low", "INTEGER", 1, 0], ["close", "INTEGER", 1, 0], ["volume", "INTEGER", 1, 0], ["adj_close", "INTEGER", 1, 0]],
+      "fetch_runs": [["fetched_at", "TEXT", 1, 1], ["symbol", "TEXT", 1, 2], ["interval", "TEXT", 1, 3], ["data_start", "TEXT", 1, 0], ["data_end", "TEXT", 1, 0], ["bar_count", "INTEGER", 1, 0]]
+    }
+  }
+}

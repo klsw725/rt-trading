@@ -181,8 +181,8 @@ def check() -> int:
             data = {
                 symbol: merge(
                     symbol,
-                    toss.daily_candles(http, token, symbol, adjusted=False),
-                    toss.daily_candles(http, token, symbol, adjusted=True),
+                    toss.candles(http, token, symbol, "1d", adjusted=False),
+                    toss.candles(http, token, symbol, "1d", adjusted=True),
                     run_at.date().isoformat(),
                 )
                 for symbol in (KODEX200, INVERSE)
