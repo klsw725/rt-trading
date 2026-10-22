@@ -13,6 +13,7 @@ wheels/
 .DS_Store
 
 # Data files (user-specific)
+data/
 data/snapshots/
 data/prompt_tuning/
 data/portfolio.json
