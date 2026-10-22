@@ -37,7 +37,7 @@
 - `report.json`
   - `run`: `fetched_at`, `data_start`, `data_end`, `simulation_start`, `simulation_end`, `trading_days`(N), `initial_capital`, `commission_rate`, `loss_limits`(`daily`, `weekly`, `cumulative`)
   - `candidates`: 후보마다 `id`, `params`, `final_equity`, `total_return`, `annualized_return`, `max_drawdown`, `first_half_return`, `second_half_return`, `yearly_returns`, `trade_count`, `win_rate`, `avg_trade_pnl`, `commission_total`, `tax_total`, `distribution_total`, `limit_triggers`(`daily`, `weekly`, `cumulative`), `criteria`(`net_positive`, `drawdown_below_limit`, `both_halves_positive`), `passed`
-  - `run.fetched_at`은 `fetch.json`의 값을 쓴다. `run.data_start`와 `run.data_end`는 검증된 거래일 목록의 처음과 끝 날짜다.
+  - `run.fetched_at`은 `fetch_runs`의 가장 늦은 `fetched_at`이다. `run.data_start`와 `run.data_end`는 검증된 거래일 목록의 처음과 끝 날짜다.
   - `run.commission_rate`는 `0.000188`, `run.loss_limits`는 `{"daily": -0.02, "weekly": -0.05, "cumulative": -0.20}`이다.
   - `params`는 PRD 04의 표를 그대로 쓴다. `yearly_returns`는 연도 문자열을 키로 쓴다(예: `{"2023": 0.0123}`).
   - `avg_trade_pnl`은 거래 순손익 합계 ÷ 거래 수를 JSON 숫자로 쓰며 원 단위 정수로 자르지 않는다. 거래가 없으면 `null`이다.
@@ -60,10 +60,11 @@ uv run rt-trading acceptance
 
 ## 필수 Acceptance
 
-SPEC 9절의 "판정" 항목을 맡는다. 사례는 임시 폴더에 가상 시세를 써서 `backtest`와 같은 흐름으로 돌린다.
+SPEC 9절의 "판정" 항목을 맡는다. 사례는 임시 SQLite 파일에 가상 시세를 넣어 `backtest`와 같은 흐름으로 돌린다.
 
 - 홀수 거래일의 앞뒤 나누기, `E_0`를 포함한 최대 낙폭, 연환산 공식, 연도별 수익, 거래 수와 승률(거래가 없으면 `null`), 통과 판정, 동점 후보의 표시 순서가 손 계산과 같다.
 - `report.json`과 `trades-{id}.csv`의 형식과 값이 기대와 같다.
+- 수집 기록이 여러 개면 가장 늦은 `fetched_at`이 `report.json`의 `run.fetched_at`에 들어간다.
 - 검증에 실패하는 데이터에서는 보고서를 만들지 않고 exit 1이다.
 - 같은 입력으로 두 번 돌리면 실행 시각을 뺀 보고서 내용이 같다.
 
