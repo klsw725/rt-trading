@@ -35,10 +35,11 @@
 `data/reports/{실행 시각 YYYYMMDD-HHMMSS}/`에 저장한다.
 
 - `report.json`
-  - `run`: `fetched_at`, `data_start`, `data_end`, `simulation_start`, `simulation_end`, `trading_days`(N), `initial_capital`, `commission_rate`, `loss_limits`(`daily`, `weekly`, `cumulative`)
+  - `run`: `fetched_at`, `data_start`, `data_end`, `simulation_start`, `simulation_end`, `trading_days`(N), `initial_capital`, `commission_rate`, `loss_limits`(`daily`, `weekly`, `cumulative`), `defect_days`
   - `candidates`: 후보마다 `id`, `params`, `final_equity`, `total_return`, `annualized_return`, `max_drawdown`, `first_half_return`, `second_half_return`, `yearly_returns`, `trade_count`, `win_rate`, `avg_trade_pnl`, `commission_total`, `tax_total`, `limit_triggers`(`daily`, `weekly`, `cumulative`), `criteria`(`net_positive`, `drawdown_below_limit`, `both_halves_positive`), `passed`
   - `run.fetched_at`은 `fetch_runs`의 가장 늦은 `fetched_at`이다. `run.data_start`와 `run.data_end`는 검증된 거래일 목록의 처음과 끝 날짜다.
   - `run.commission_rate`는 `0.000188`, `run.loss_limits`는 `{"daily": -0.02, "weekly": -0.05, "cumulative": -0.20}`이다.
+  - `run.defect_days`는 시뮬레이션 기간에 든 결함일(PRD 02)의 날짜 목록이다.
   - `params`는 PRD 04의 표를 그대로 쓴다. `yearly_returns`는 연도 문자열을 키로 쓴다(예: `{"2023": 0.0123}`).
   - `avg_trade_pnl`은 거래 순손익 합계 ÷ 거래 수를 JSON 숫자로 쓰며 원 단위 정수로 자르지 않는다. 거래가 없으면 `null`이다.
 - `trades-{id}.csv`: PRD 03의 체결 내역. 열은 `time,symbol,side,quantity,price,commission,tax,reason`이다.
