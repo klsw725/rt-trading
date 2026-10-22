@@ -1,6 +1,7 @@
 """v1 acceptance. PRD별 사례를 네트워크 없이 실행하고 결과를 JSON으로 출력한다."""
 
 import contextlib
+import copy
 import io
 import json
 import sqlite3
@@ -14,7 +15,7 @@ from typing import NamedTuple
 
 import httpx
 
-from rt_trading import cli, store, toss
+from rt_trading import cli, fixtures, market_data, sessions, store, toss
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "docs" / "specs" / "v1" / "fixtures"
@@ -239,6 +240,103 @@ def case_gitignore() -> None:
     assert done.stdout.split() == paths, done.stdout
 
 
+# PRD 02 장 일정, 데이터 검증, 기준가
+
+
+def _prd02() -> dict:
+    return json.loads((FIXTURES / "prd02-data.json").read_text(encoding="utf-8"))
+
+
+def _patched(spec: dict, patches: list[dict]) -> dict:
+    """spec의 날짜마다 patches의 bars·ratio를 합치고 omit을 더하고 volume을 바꾼다."""
+    spec = copy.deepcopy(spec)
+    days = {day["date"]: day for day in spec["days"]}
+    for patch in patches:
+        day = days[patch["date"]]
+        for symbol, bars in patch.get("bars", {}).items():
+            day.setdefault("bars", {}).setdefault(symbol, {}).update(bars)
+        day.setdefault("ratio", {}).update(patch.get("ratio", {}))
+        day.setdefault("omit", []).extend(patch.get("omit", []))
+        if "volume" in patch:
+            day["volume"] = patch["volume"]
+    return spec
+
+
+def _load(spec: dict) -> tuple[market_data.MarketData | None, list[market_data.Violation]]:
+    with _temp_db() as db:
+        fixtures.build(spec, db)
+        return market_data.load(db)
+
+
+def case_sessions() -> None:
+    table = sessions.exceptions()
+    for date, expected in _prd02()["sessions"].items():
+        session = sessions.session(date, table)
+        actual = {"count": len(session.bars), "first": session.bars[0], "last": session.bars[-1], "window": session.window}
+        assert actual == expected, (date, actual)
+
+
+def case_valid_data() -> None:
+    fixture = _prd02()
+    expected = fixture["expected"]
+    data, violations = _load(fixture["valid"])
+    assert data and not violations, market_data.describe(violations)
+    assert data.days == expected["days"], data.days
+    for symbol in market_data.SYMBOLS:
+        assert {date: len(bars) for date, bars in data.bars[symbol].items()} == expected["bar_counts"], symbol
+        assert data.base[symbol] == expected["base"][symbol], (symbol, data.base[symbol])
+    for symbol, days in expected["open_bar"].items():
+        for date, opening in days.items():
+            bar = market_data.open_bar(data.bars[symbol][date])
+            assert [bar.time, bar.open] == opening, (symbol, date, bar)
+    assert data.defects == expected["defects"], data.defects
+
+
+def case_violations() -> None:
+    fixture = _prd02()
+    for case in fixture["violations"]:
+        data, violations = _load(_patched(fixture["valid"], case["patches"]))
+        actual = sorted({(v.code, v.date, v.symbol) for v in violations})
+        expected = sorted(tuple(item) for item in case["expected"])
+        assert actual == expected, (case["name"], actual)
+        assert (data is None) == bool(expected), case["name"]
+        text = market_data.describe(violations)
+        assert all(date in text for _, date, _ in expected), (case["name"], text)
+
+
+def case_daily_malformed() -> None:
+    with _temp_db() as db:
+        fixtures.build(_prd02()["valid"], db)
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("UPDATE candles_1d SET high = close - 1 WHERE symbol = '114800' AND date = '2024-01-04'")
+            conn.execute("UPDATE candles_1d SET volume = -5 WHERE symbol = '069500' AND date = '2025-11-13'")
+        data, violations = market_data.load(db)
+    actual = sorted((v.code, v.date, v.symbol) for v in violations)
+    expected = [("V1_BAR_MALFORMED", "2024-01-04", "114800"), ("V1_BAR_MALFORMED", "2025-11-13", "069500")]
+    assert data is None and actual == expected, actual
+
+
+def case_data_missing() -> None:
+    fixture = _prd02()
+    with _temp_db() as db:
+        assert [v.code for v in market_data.load(db)[1]] == ["V1_DATA_MISSING"]  # DB 파일이 없다
+    no_minute = [{"date": date, "omit": [["114800", "1m"]]} for date in fixture["expected"]["days"]]
+    _, violations = _load(_patched(fixture["valid"], no_minute))
+    assert sorted((v.code, v.symbol) for v in violations) == [("V1_DATA_MISSING", ""), ("V1_DATA_MISSING", "114800")]
+    with _temp_db() as db:
+        fixtures.build(fixture["valid"], db)
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("DELETE FROM fetch_runs WHERE symbol = '069500' AND interval = '1d'")
+        _, violations = market_data.load(db)
+    assert [(v.code, v.symbol) for v in violations] == [("V1_DATA_MISSING", "")], violations
+
+
+def case_base_price() -> None:
+    for item in _prd02()["base_price"]:
+        price, problem = market_data.base_price(*item["args"])
+        assert [price, bool(problem)] == item["expected"], (item["why"], price, problem)
+
+
 CASES = {
     "01": [
         ("페이지네이션: 세 페이지, 2022-11-23 전 봉과 당일 봉 버림, 오름차순 저장", case_pagination),
@@ -252,6 +350,14 @@ CASES = {
         ("실패하면 기존 내용 유지", case_rollback),
         ("출력과 DB에 인증 정보와 토큰 없음", case_no_secrets),
         ("data/는 git에서 제외", case_gitignore),
+    ],
+    "02": [
+        ("장 일정: 정상일 390개, 연초 첫 거래일 330개, 수능일 390개와 종가 동시호가·접수 구간", case_sessions),
+        ("검증 통과: 장 밖 빈 봉 버림, 늦은 시가 봉, 결함일 목록, 준비일 뺀 기준가", case_valid_data),
+        ("코드마다 어긴 사례가 그 코드로 실패하고 어긴 날짜를 모두 출력", case_violations),
+        ("일봉 OHLC 불변식 위반·음수 거래량은 V1_BAR_MALFORMED", case_daily_malformed),
+        ("V1_DATA_MISSING: DB 파일, 종목별 행, 가장 늦은 수집 기록", case_data_missing),
+        ("기준가: 비율 공식, 0.5원 올림, 2원 이내 무변화, 분배락일, 상승·3% 초과 하락 실패", case_base_price),
     ],
 }
 
