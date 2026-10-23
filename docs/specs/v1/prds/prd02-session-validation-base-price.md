@@ -74,7 +74,7 @@ SPEC 3.4를 구현한다. 어긴 것을 모두 모아 날짜, 종목, 코드와 
 | --- | --- |
 | `V1_DATA_MISSING` | DB 파일이 없거나, 두 종목 중 하나라도 `candles_1m` 또는 `candles_1d`에 행이 없거나, 가장 늦은 `fetched_at`의 `fetch_runs` 네 행이 없다 |
 | `V1_SESSION_MISMATCH` | 장 일정의 예상 봉이 빠졌거나, 그 밖의 시각에 거래량이 있는 봉이 있다 |
-| `V1_BAR_MALFORMED` | 1분봉 시각 중복·역전, 1분봉이나 일봉의 OHLC 불변식 위반·음수 거래량 |
+| `V1_BAR_MALFORMED` | 1분봉이나 일봉의 OHLC 불변식 위반·음수 거래량 |
 | `V1_AUCTION_VOLUME_ZERO` | 시가 봉이 없거나, 종가 동시호가 봉의 거래량이 0이다 |
 | `V1_AUCTION_WINDOW_TRADED` | 종가 동시호가 접수 구간 봉에 거래량이 있다 |
 | `V1_TRADING_DAY_MISMATCH` | 두 종목의 거래일이 다르거나, 일봉과 1분봉의 거래일이 다르다 |
