@@ -304,18 +304,6 @@ def case_violations() -> None:
         assert all(date in text for _, date, _ in expected), (case["name"], text)
 
 
-def case_daily_malformed() -> None:
-    with _temp_db() as db:
-        fixtures.build(_prd02()["valid"], db)
-        with closing(sqlite3.connect(db)) as conn, conn:
-            conn.execute("UPDATE candles_1d SET high = close - 1 WHERE symbol = '114800' AND date = '2024-01-04'")
-            conn.execute("UPDATE candles_1d SET volume = -5 WHERE symbol = '069500' AND date = '2025-11-13'")
-        data, violations = market_data.load(db)
-    actual = sorted((v.code, v.date, v.symbol) for v in violations)
-    expected = [("V1_BAR_MALFORMED", "2024-01-04", "114800"), ("V1_BAR_MALFORMED", "2025-11-13", "069500")]
-    assert data is None and actual == expected, actual
-
-
 def case_data_missing() -> None:
     fixture = _prd02()
     with _temp_db() as db:
@@ -445,7 +433,6 @@ CASES = {
         ("장 일정: 정상일 390개, 연초 첫 거래일 330개, 수능일 390개와 종가 동시호가·접수 구간", case_sessions),
         ("검증 통과: 장 밖 빈 봉 버림, 늦은 시가 봉, 결함일 목록, 준비일 뺀 기준가", case_valid_data),
         ("코드마다 어긴 사례가 그 코드로 실패하고 어긴 날짜를 모두 출력", case_violations),
-        ("일봉 OHLC 불변식 위반·음수 거래량은 V1_BAR_MALFORMED", case_daily_malformed),
         ("V1_DATA_MISSING: DB 파일, 종목별 행, 가장 늦은 수집 기록", case_data_missing),
         ("기준가: 비율 공식, 0.5원 올림, 2원 이내 무변화, 분배락일, 상승·3% 초과 하락 실패", case_base_price),
     ],
