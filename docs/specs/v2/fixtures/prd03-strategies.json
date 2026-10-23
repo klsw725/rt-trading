@@ -1,0 +1,91 @@
+{
+  "description": "v2 PRD 03 acceptance용 전략 사례와 손으로 정한 기대 주문. 실제 시세가 아니다. ①②④는 사례마다 엔진이 넘기는 것과 같은 View를 만든다(그 시각 KODEX 200 봉 하나, 기준가 30,000원). ③은 last_half_hour 시장(fixtures.build 형식)에서 View를 만든다.",
+  "calendars": {
+    "sep_oct": ["2023-09-20", "2023-09-21", "2023-09-22", "2023-09-25", "2023-09-26", "2023-09-27", "2023-10-04", "2023-10-05", "2023-10-06", "2023-10-10", "2023-10-11"],
+    "sep_oct_short": ["2023-09-20", "2023-09-21", "2023-09-22", "2023-09-25", "2023-09-26", "2023-09-27", "2023-10-04", "2023-10-05"],
+    "suneung": ["2025-11-12", "2025-11-13", "2025-11-14", "2025-12-01", "2025-12-02", "2025-12-03"]
+  },
+  "adj_closes": {
+    "notes": "[값, 개수]를 이어 붙인다. up: 200 × 30001 = 6,000,200 > 합 6,000,001이라 위. equal: 합과 같아 아래. outside_window: 마지막 200개는 up과 같아 위(맨 앞 31000까지 201개를 합하면 6,031,001이라 200 × 30001로도 201 × 30001 = 6,030,201로도 아래). short_window: 마지막 200개 합 5,999,000 < 6,000,000이라 위(199개만 쓰면 같아서 아래)",
+    "up": [[30000, 199], [30001, 1]],
+    "equal": [[30000, 200]],
+    "outside_window": [[31000, 1], [30000, 199], [30001, 1]],
+    "short_window": [[29000, 1], [30000, 199]]
+  },
+  "checks": [
+    {"group": "turn_of_month", "name": "9월 28·29일이 휴장이라 9월 마지막 거래일은 09-27, 사는 날은 09-26이다", "candidate": "turn_of_month", "calendar": "sep_oct", "date": "2023-09-26", "time": "15:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "turn_of_month", "name": "09-25는 사는 날이 아니다", "candidate": "turn_of_month", "calendar": "sep_oct", "date": "2023-09-25", "time": "15:20", "expected": null},
+    {"group": "turn_of_month", "name": "10월 2·3일이 휴장이라 셋째 거래일 10-06에 09-26 체결 보유를 판다", "candidate": "turn_of_month", "calendar": "sep_oct", "date": "2023-10-06", "time": "15:20", "holding": ["069500", "2023-09-26 15:30"], "expected": ["sell", null, "signal"]},
+    {"group": "turn_of_month", "name": "10-05는 그 회차의 파는 날이 아니다", "candidate": "turn_of_month", "calendar": "sep_oct", "date": "2023-10-05", "time": "15:20", "holding": ["069500", "2023-09-26 15:30"], "expected": null},
+    {"group": "turn_of_month", "name": "파는 날 10-06이 결함일이면 그 회차는 사지 않는다", "candidate": "turn_of_month", "calendar": "sep_oct", "defect_days": ["2023-10-06"], "date": "2023-09-26", "time": "15:20", "expected": null},
+    {"group": "turn_of_month", "name": "달력이 10-05에 끝나 파는 날이 데이터 밖이면 사지 않는다", "candidate": "turn_of_month", "calendar": "sep_oct_short", "date": "2023-09-26", "time": "15:20", "expected": null},
+    {"group": "turn_of_month", "name": "사는 날 09-26이 결함일이면 사지 않는다", "candidate": "turn_of_month", "calendar": "sep_oct", "defect": true, "defect_days": ["2023-09-26"], "date": "2023-09-26", "time": "15:20", "expected": null},
+    {"group": "trend", "name": "②추세 위, 보유 없음: KODEX 200을 산다", "candidate": "trend_200", "adj": "up", "date": "2023-10-11", "time": "15:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "trend", "name": "②평균과 같으면 아래: 인버스를 산다", "candidate": "trend_200", "adj": "equal", "date": "2023-10-11", "time": "15:20", "expected": ["buy", "114800", "signal"]},
+    {"group": "trend", "name": "②인버스를 들고 추세 위: KODEX 200으로 갈아탄다", "candidate": "trend_200", "adj": "up", "date": "2023-10-11", "time": "15:20", "holding": ["114800", "2023-10-10 15:30"], "expected": ["switch", "069500", "switch"]},
+    {"group": "trend", "name": "②KODEX 200을 들고 평균과 같으면 인버스로 갈아탄다", "candidate": "trend_200", "adj": "equal", "date": "2023-10-11", "time": "15:20", "holding": ["069500", "2023-10-10 15:30"], "expected": ["switch", "114800", "switch"]},
+    {"group": "trend", "name": "②목표 종목을 이미 들고 있으면 주문하지 않는다", "candidate": "trend_200", "adj": "up", "date": "2023-10-11", "time": "15:20", "holding": ["069500", "2023-10-10 15:30"], "expected": null},
+    {"group": "trend", "name": "②마지막 200개 밖의 값(31000)은 쓰지 않는다: 위라 KODEX 200을 산다", "candidate": "trend_200", "adj": "outside_window", "date": "2023-10-11", "time": "15:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "trend", "name": "②마지막 200개를 모두 쓴다: 위라 KODEX 200을 산다", "candidate": "trend_200", "adj": "short_window", "date": "2023-10-11", "time": "15:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "trend", "name": "④추세 위, 보유 없음: KODEX 200을 산다", "candidate": "overnight_trend", "adj": "up", "date": "2023-10-11", "time": "15:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "trend", "name": "④평균과 같으면 아래: 인버스를 산다", "candidate": "overnight_trend", "adj": "equal", "date": "2023-10-11", "time": "15:20", "expected": ["buy", "114800", "signal"]},
+    {"group": "trend", "name": "④종가 동시호가 분(15:30)에 보유가 있으면 판다", "candidate": "overnight_trend", "adj": "up", "date": "2023-10-11", "time": "15:30", "holding": ["069500", "2023-10-11 15:30"], "expected": ["sell", null, "signal"]},
+    {"group": "trend", "name": "④종가 동시호가 분에 보유가 없으면 주문하지 않는다", "candidate": "overnight_trend", "adj": "up", "date": "2023-10-11", "time": "15:30", "expected": null},
+    {"group": "trend", "name": "④마감 10분 전에 보유가 있으면 사지 않는다", "candidate": "overnight_trend", "adj": "up", "date": "2023-10-11", "time": "15:20", "holding": ["069500", "2023-10-10 15:30"], "expected": null},
+    {"group": "times", "name": "①수능일인 사는 날 2025-11-13은 16:20에 산다", "candidate": "turn_of_month", "calendar": "suneung", "date": "2025-11-13", "time": "16:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "times", "name": "①수능일 15:20에는 사지 않는다", "candidate": "turn_of_month", "calendar": "suneung", "date": "2025-11-13", "time": "15:20", "expected": null},
+    {"group": "times", "name": "①정상일 15:19에는 사지 않는다", "candidate": "turn_of_month", "calendar": "sep_oct", "date": "2023-09-26", "time": "15:19", "expected": null},
+    {"group": "times", "name": "①정상일 15:21에는 사지 않는다", "candidate": "turn_of_month", "calendar": "sep_oct", "date": "2023-09-26", "time": "15:21", "expected": null},
+    {"group": "times", "name": "②수능일은 16:20에 산다", "candidate": "trend_200", "adj": "up", "date": "2025-11-13", "time": "16:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "times", "name": "②수능일 15:20에는 사지 않는다", "candidate": "trend_200", "adj": "up", "date": "2025-11-13", "time": "15:20", "expected": null},
+    {"group": "times", "name": "②연초 첫 거래일은 15:20에 산다", "candidate": "trend_200", "adj": "up", "date": "2024-01-02", "time": "15:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "times", "name": "④수능일은 16:20에 산다", "candidate": "overnight_trend", "adj": "up", "date": "2025-11-13", "time": "16:20", "expected": ["buy", "069500", "signal"]},
+    {"group": "times", "name": "④수능일 16:19에는 보유가 없어도 사지 않는다", "candidate": "overnight_trend", "adj": "up", "date": "2025-11-13", "time": "16:19", "expected": null},
+    {"group": "times", "name": "④수능일 종가 동시호가 분은 16:30이라 그때 판다", "candidate": "overnight_trend", "adj": "up", "date": "2025-11-13", "time": "16:30", "holding": ["069500", "2025-11-13 16:30"], "expected": ["sell", null, "signal"]},
+    {"group": "times", "name": "④수능일 15:30에는 팔지 않는다", "candidate": "overnight_trend", "adj": "up", "date": "2025-11-13", "time": "15:30", "holding": ["069500", "2025-11-12 15:30"], "expected": null},
+    {"group": "defect", "name": "②결함일에는 주문하지 않는다", "candidate": "trend_200", "adj": "up", "defect": true, "defect_days": ["2023-10-11"], "date": "2023-10-11", "time": "15:20", "expected": null},
+    {"group": "defect", "name": "④결함일에는 사지 않는다", "candidate": "overnight_trend", "adj": "up", "defect": true, "defect_days": ["2023-10-11"], "date": "2023-10-11", "time": "15:20", "expected": null},
+    {"group": "defect", "name": "④결함일 종가 동시호가 분에도 주문하지 않는다", "candidate": "overnight_trend", "adj": "up", "defect": true, "defect_days": ["2023-10-11"], "date": "2023-10-11", "time": "15:30", "holding": ["069500", "2023-10-10 15:30"], "expected": null}
+  ],
+  "last_half_hour": {
+    "notes": [
+      "모든 날 기준가는 전 거래일 종가 30,000원이다. 2024-11-14는 data_defects.csv의 결함일(수능일)이다",
+      "2024-01-02(연초 첫 거래일, 10:00 개장)은 10:30 봉 종가 30,010원이 기준가보다 커서 15:00에 산다",
+      "2024-01-03은 09:30 봉 종가가 기준가와 같아 사지 않는다(10:30 봉 종가 30,010원은 판단 시각이 아니다)",
+      "2024-01-04는 KODEX 200 09:01~09:30 봉 거래량이 0이라 개장 30분 뒤까지 시가 봉이 없다. 09:30 봉 종가 30,050원이어도 사지 않는다",
+      "2024-01-05는 09:30 봉 종가 30,010원이라 15:00에 산다. 같은 날 View에서 09:30 봉이나 15:00 봉을 빼면 사지 않는다",
+      "2025-11-13(수능일, 10:00~16:30)은 10:30 봉 종가 30,010원이라 16:00에 산다. 15:00에는 사지 않는다"
+    ],
+    "market": {
+      "fetched_at": "2026-10-22T16:05:00+09:00",
+      "volume": 100,
+      "days": [
+        {"date": "2023-12-28", "prices": {"069500": 30000, "114800": 5000}},
+        {"date": "2024-01-02", "bars": {"069500": {"10:30": [30000, 30010, 30000, 30010, 100], "10:31": [30010, 30010, 30000, 30000, 100]}}},
+        {"date": "2024-01-03", "bars": {"069500": {"10:30": [30000, 30010, 30000, 30010, 100], "10:31": [30010, 30010, 30000, 30000, 100]}}},
+        {"date": "2024-01-04", "bars": {"069500": {
+          "09:01": [30000, 30000, 30000, 30000, 0], "09:02": [30000, 30000, 30000, 30000, 0], "09:03": [30000, 30000, 30000, 30000, 0], "09:04": [30000, 30000, 30000, 30000, 0], "09:05": [30000, 30000, 30000, 30000, 0],
+          "09:06": [30000, 30000, 30000, 30000, 0], "09:07": [30000, 30000, 30000, 30000, 0], "09:08": [30000, 30000, 30000, 30000, 0], "09:09": [30000, 30000, 30000, 30000, 0], "09:10": [30000, 30000, 30000, 30000, 0],
+          "09:11": [30000, 30000, 30000, 30000, 0], "09:12": [30000, 30000, 30000, 30000, 0], "09:13": [30000, 30000, 30000, 30000, 0], "09:14": [30000, 30000, 30000, 30000, 0], "09:15": [30000, 30000, 30000, 30000, 0],
+          "09:16": [30000, 30000, 30000, 30000, 0], "09:17": [30000, 30000, 30000, 30000, 0], "09:18": [30000, 30000, 30000, 30000, 0], "09:19": [30000, 30000, 30000, 30000, 0], "09:20": [30000, 30000, 30000, 30000, 0],
+          "09:21": [30000, 30000, 30000, 30000, 0], "09:22": [30000, 30000, 30000, 30000, 0], "09:23": [30000, 30000, 30000, 30000, 0], "09:24": [30000, 30000, 30000, 30000, 0], "09:25": [30000, 30000, 30000, 30000, 0],
+          "09:26": [30000, 30000, 30000, 30000, 0], "09:27": [30000, 30000, 30000, 30000, 0], "09:28": [30000, 30000, 30000, 30000, 0], "09:29": [30000, 30000, 30000, 30000, 0], "09:30": [30000, 30050, 30000, 30050, 0],
+          "09:31": [30050, 30050, 30000, 30000, 100]}}},
+        {"date": "2024-01-05", "bars": {"069500": {"09:30": [30000, 30010, 30000, 30010, 100], "09:31": [30010, 30010, 30000, 30000, 100]}}},
+        {"date": "2024-11-14", "bars": {"069500": {"10:30": [30000, 30010, 30000, 30010, 100], "10:31": [30010, 30010, 30000, 30000, 100]}}},
+        {"date": "2025-11-13", "bars": {"069500": {"10:30": [30000, 30010, 30000, 30010, 100], "10:31": [30010, 30010, 30000, 30000, 100]}}}
+      ]
+    },
+    "checks": [
+      {"group": "last_half_hour", "name": "연초 첫 거래일: 10:30 신호, 15:00에 산다", "date": "2024-01-02", "time": "15:00", "expected": ["buy", "069500", "signal"]},
+      {"group": "last_half_hour", "name": "09:30 봉 종가가 기준가와 같으면 사지 않는다", "date": "2024-01-03", "time": "15:00", "expected": null},
+      {"group": "last_half_hour", "name": "개장 30분 뒤까지 시가 봉이 없으면 사지 않는다", "date": "2024-01-04", "time": "15:00", "expected": null},
+      {"group": "last_half_hour", "name": "정상일: 09:30 신호, 15:00에 산다", "date": "2024-01-05", "time": "15:00", "expected": ["buy", "069500", "signal"]},
+      {"group": "last_half_hour", "name": "개장 30분 뒤 봉이 없으면 사지 않는다", "date": "2024-01-05", "time": "15:00", "drop": ["09:30"], "expected": null},
+      {"group": "last_half_hour", "name": "마감 30분 전 봉이 없으면 사지 않는다", "date": "2024-01-05", "time": "15:00", "drop": ["15:00"], "expected": null},
+      {"group": "last_half_hour", "name": "수능일: 10:30 신호, 16:00에 산다", "date": "2025-11-13", "time": "16:00", "expected": ["buy", "069500", "signal"]},
+      {"group": "last_half_hour", "name": "수능일 15:00에는 사지 않는다", "date": "2025-11-13", "time": "15:00", "expected": null},
+      {"group": "defect", "name": "③결함일에는 사지 않는다(신호가 있어도)", "date": "2024-11-14", "time": "16:00", "expected": null}
+    ]
+  }
+}

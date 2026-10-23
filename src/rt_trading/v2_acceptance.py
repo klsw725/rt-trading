@@ -11,7 +11,7 @@ from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from rt_trading import engine, fixtures, market_data, v2_stage1
+from rt_trading import engine, fixtures, market_data, sessions, v2_stage1, v2_strategies
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "docs" / "specs" / "v2" / "fixtures"
@@ -279,6 +279,75 @@ def case_engine_intraday() -> None:
     _check_records(_run_orders(_market(case["market"]), run["orders"], case["start"], run["overnight"]), run["expected"])
 
 
+# PRD 03 2단계 후보 전략
+
+
+def _prd03() -> dict:
+    return json.loads((FIXTURES / "prd03-strategies.json").read_text(encoding="utf-8"))
+
+
+def _given_view(fixture: dict, check: dict) -> engine.View:
+    """①②④ 사례의 View. 그 시각 KODEX 200 봉 하나와 사례에 적은 달력·결함일·보유·수정 종가를 넣는다."""
+    date, time = check["date"], check["time"]
+    bar = market_data.Bar(time, 30000, 30000, 30000, 30000, 100)
+    holding = check.get("holding") and engine.Holding(check["holding"][0], 1, 0, 0, check["holding"][1])
+    adj_closes = [value for value, count in fixture["adj_closes"][check.get("adj", "up")] for _ in range(count)]
+    return engine.View(
+        date, time, sessions.session(date, sessions.exceptions()), {engine.KODEX200: 30000, engine.INVERSE: 5000},
+        check.get("defect", False), {engine.KODEX200: [bar], engine.INVERSE: [bar]}, {}, [], holding, False,
+        fixture["calendars"][check.get("calendar", "sep_oct")], check.get("defect_days", []), adj_closes,
+    )
+
+
+def _market_view(data: market_data.MarketData, check: dict) -> engine.View:
+    """엔진이 그 분에 넘기는 것과 같은 View. drop에 적은 시각의 KODEX 200 봉은 뺀다."""
+    date, time, drop = check["date"], check["time"], set(check.get("drop", []))
+    today = {
+        symbol: [bar for bar in days[date] if bar.time <= time and not (symbol == engine.KODEX200 and bar.time in drop)]
+        for symbol, days in data.bars.items()
+    }
+    past_days = data.days[: data.days.index(date)]
+    past = {symbol: {day: days[day] for day in past_days} for symbol, days in data.bars.items()}
+    base = {symbol: data.base[symbol][date] for symbol in data.bars}
+    adj_closes = [data.daily[engine.KODEX200][day][1] for day in past_days]
+    return engine.View(
+        date, time, data.sessions[date], base, date in data.defects, today, past, past_days, None, False, data.days, data.defects, adj_closes
+    )
+
+
+def _strategy_checks(group: str) -> None:
+    fixture = _prd03()
+    for check in (check for check in fixture["checks"] if check["group"] == group):
+        order = v2_strategies.CANDIDATES[check["candidate"]]()(_given_view(fixture, check))
+        assert (order and list(order)) == check["expected"], (check["name"], order)
+    market = fixture["last_half_hour"]
+    checks = [check for check in market["checks"] if check["group"] == group]
+    data = _market(market["market"]) if checks else None
+    for check in checks:
+        order = v2_strategies.CANDIDATES["last_half_hour"]()(_market_view(data, check))
+        assert (order and list(order)) == check["expected"], (check["name"], order)
+
+
+def case_strategy_turn_of_month() -> None:
+    _strategy_checks("turn_of_month")
+
+
+def case_strategy_trend() -> None:
+    _strategy_checks("trend")
+
+
+def case_strategy_times() -> None:
+    _strategy_checks("times")
+
+
+def case_strategy_last_half_hour() -> None:
+    _strategy_checks("last_half_hour")
+
+
+def case_strategy_defect() -> None:
+    _strategy_checks("defect")
+
+
 CASES = {
     "01": [
         ("1단계 일봉 확인: 표·열·기본 키, 0 이하 가격, 인버스 상장 뒤 거래일, 인버스 전 200거래일(정확히 200일은 통과)", case_stage1_data),
@@ -299,6 +368,13 @@ CASES = {
         ("전략에 보이는 값: 달력·결함일 표·전 거래일까지의 수정 종가, 수정 종가를 바꿔도 그 전 주문이 같다", case_engine_view),
         ("첫 판단일, 마지막 거래일의 매수 없음과 매도 사유, 미래 봉을 바꿔도 그 전 체결과 자산열이 같다", case_engine_start_last_day),
         ("③: v1처럼 그날 종가 동시호가에 사유 close로 팔고 보유를 남기지 않는다", case_engine_intraday),
+    ],
+    "03": [
+        ("①: 사는 날·파는 날(휴장일이 낀 달력), 파는 날이 결함일이거나 데이터 밖인 회차와 결함일인 사는 날은 사지 않음", case_strategy_turn_of_month),
+        ("②·④: 전 거래일 추세(평균과 같으면 아래, 마지막 200개), ②의 갈아타기와 그대로 두기, ④의 종가 동시호가 분 매도", case_strategy_trend),
+        ("며칠 보유 후보의 주문 시각: 마감 10분 전 봉(정상일·연초 15:20, 수능일 16:20), ④의 수능일 종가 동시호가 분", case_strategy_times),
+        ("③: 개장 30분 뒤 종가가 기준가보다 클 때만 마감 30분 전에 사고, 장 유형별 시각과 세 건너뛰기", case_strategy_last_half_hour),
+        ("결함일에는 주문하지 않는다", case_strategy_defect),
     ],
 }
 
