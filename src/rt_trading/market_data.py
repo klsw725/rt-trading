@@ -36,6 +36,7 @@ class MarketData(NamedTuple):
     bars: dict[str, dict[str, list[Bar]]]  # 종목 → 날짜 → 1분봉(장 일정 밖 거래량 0 봉을 버린 뒤, 시각 오름차순)
     base: dict[str, dict[str, int]]  # 종목 → 날짜 → 기준가. 데이터 첫 거래일(준비일)은 없다
     defects: list[str]  # 데이터 기간의 결함일. 이날은 거래하지 않는다
+    daily: dict[str, dict[str, tuple[int, int]]] = {}  # 종목 → 날짜 → (일봉 원가격 종가, 수정 종가)
 
 
 def load(path: Path) -> tuple[MarketData | None, list[Violation]]:
@@ -80,7 +81,7 @@ def load(path: Path) -> tuple[MarketData | None, list[Violation]]:
     if violations:
         return None, sorted(violations)
     days = sorted(first)
-    data = MarketData(days, {date: sessions.session(date, table) for date in days}, minute, base, sorted(defects & first))
+    data = MarketData(days, {date: sessions.session(date, table) for date in days}, minute, base, sorted(defects & first), daily)
     return data, []
 
 

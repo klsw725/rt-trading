@@ -9,7 +9,7 @@ from rt_trading.sessions import Session
 
 INITIAL_CASH = 500_000
 WARMUP_DAYS = 14  # 시뮬레이션은 데이터의 15번째 거래일부터 한다
-INVERSE = "114800"
+KODEX200, INVERSE = "069500", "114800"
 TICK_CHANGE = "2023-12-11"  # 이날부터 2,000원 미만 ETF 호가 단위가 1원
 
 
@@ -25,6 +25,7 @@ class Holding(NamedTuple):
     price: int  # 매수 체결가
     cost: int  # 매수 금액 + 수수료
     entry: str  # 매수 체결 시각
+    received: int = 0  # 보유 중 받은 분배금 − 세금
 
 
 class View(NamedTuple):
@@ -40,6 +41,9 @@ class View(NamedTuple):
     past_days: list[str]  # 지난 거래일 오름차순
     holding: Holding | None
     pending: bool  # 대기 중인 주문이 있는가
+    calendar: list[str] = []  # 거래일 날짜 전체
+    defect_days: list[str] = []  # 결함일 표
+    adj_closes: list[int] = []  # 전 거래일까지의 KODEX 200 일봉 수정 종가(날짜 오름차순)
 
 
 class Fill(NamedTuple):
@@ -65,7 +69,7 @@ class Discard(NamedTuple):
     time: str
     kind: str  # 버리거나 취소한 주문의 종류
     symbol: str | None
-    reason: str  # entry_blocked(진입 막힘), pending(대기 주문 있음), after_close(마감 지남)
+    reason: str  # entry_blocked(진입 막힘), pending(대기 주문 있음), after_close(마감 지남), last_day(마지막 거래일)
 
 
 class Records(NamedTuple):
@@ -75,6 +79,7 @@ class Records(NamedTuple):
     trades: list[Trade]
     limits: list[tuple[str, str]]  # (시각, daily·weekly·cumulative). 기간마다 처음 한 번
     discarded: list[Discard]
+    distributions: list[tuple[str, str, int, int]] = []  # (날짜, 종목, 분배금, 세금)
 
 
 class _Buy(NamedTuple):
@@ -84,25 +89,43 @@ class _Buy(NamedTuple):
     after_sell: bool  # 전환 매수라 매도 체결을 기다린다
 
 
-def run(data: MarketData, strategy: Callable[[View], Order | None]) -> Records:
-    """시뮬레이션 시작일부터 마지막 거래일까지 분마다 PRD 03의 순서로 처리한다."""
+def run(data: MarketData, strategy: Callable[[View], Order | None], start: int = WARMUP_DAYS, overnight: bool = False) -> Records:
+    """start 거래일부터 마지막 거래일까지 분마다 PRD 03의 순서로 처리한다.
+
+    overnight이면 v2 PRD 02의 며칠 보유 방식이다. 기본값으로 부르면 v1과 같다.
+    """
     symbols = sorted(data.bars)  # 입력 순서와 관계없이 같은 결과를 낸다
     defects = set(data.defects)
-    records = Records([("", INITIAL_CASH)], {}, [], [], [], [])
+    records = Records([("", INITIAL_CASH)], {}, [], [], [], [], [])
     cash, holding, sell_reason, buy = INITIAL_CASH, None, None, None
-    past, past_days = {symbol: {} for symbol in symbols}, []
+    past, past_days, adj_closes = {symbol: {} for symbol in symbols}, [], []
     last_close = weekly_base = INITIAL_CASH
     week, cumulative_hit = None, False
+    last_price = {}  # 종목 → 가장 최근 봉 종가. 거래일이 바뀌어도 이어 쓴다
     for index, date in enumerate(data.days):
-        if index >= WARMUP_DAYS:
+        if index >= start:
+            final = index == len(data.days) - 1
+            settle_at_close = not overnight or final
             if Date.fromisoformat(date).isocalendar()[:2] != week:
                 week, weekly_base, weekly_hit = Date.fromisoformat(date).isocalendar()[:2], last_close, False
             daily_base, daily_hit = last_close, False
             session, close_time = data.sessions[date], data.sessions[date].bars[-1]
             bars = {symbol: {bar.time: bar for bar in data.bars[symbol].get(date, [])} for symbol in symbols}
-            today, last_price, opened = {symbol: [] for symbol in symbols}, {}, set()
+            today, opened = {symbol: [] for symbol in symbols}, set()
             base = {symbol: data.base[symbol][date] for symbol in symbols}
-            for time in sorted(set().union(*bars.values())):
+            times = sorted(set().union(*bars.values()))
+
+            # 첫 봉 전: 들고 있는 종목의 분배락일이면 분배금 − 세금을 받는다
+            if holding and base[holding.symbol] < data.daily[holding.symbol][data.days[index - 1]][0]:
+                amount = (data.daily[holding.symbol][data.days[index - 1]][0] - base[holding.symbol]) * holding.quantity
+                tax = amount * 154 // 1000
+                cash += amount - tax
+                holding = holding._replace(received=holding.received + amount - tax)
+                records.distributions.append((date, holding.symbol, amount, tax))
+            if overnight and final and buy:
+                records.discarded.append(Discard(f"{date} {times[0]}", buy.kind, buy.symbol, "last_day"))
+                buy = None
+            for time in times:
                 stamp, now, auction = f"{date} {time}", {symbol: bars[symbol].get(time) for symbol in symbols}, {}
                 for symbol, bar in now.items():
                     if bar:
@@ -113,7 +136,7 @@ def run(data: MarketData, strategy: Callable[[View], Order | None]) -> Records:
                             opened.add(symbol)
 
                 # 1. 종가 동시호가 분
-                if time == close_time:
+                if time == close_time and settle_at_close:
                     if buy:
                         records.discarded.append(Discard(stamp, buy.kind, buy.symbol, "after_close"))
                         buy = None
@@ -131,7 +154,7 @@ def run(data: MarketData, strategy: Callable[[View], Order | None]) -> Records:
                     cash += amount - fee - tax
                     records.fills.append(Fill(stamp, holding.symbol, "sell", holding.quantity, price, fee, tax, sell_reason))
                     records.trades.append(
-                        Trade(holding.symbol, holding.entry, stamp, holding.quantity, amount - fee - tax - holding.cost)
+                        Trade(holding.symbol, holding.entry, stamp, holding.quantity, amount - fee - tax - holding.cost + holding.received)
                     )
                     holding, sell_reason = None, None
                     if buy:
@@ -170,12 +193,17 @@ def run(data: MarketData, strategy: Callable[[View], Order | None]) -> Records:
                         buy = None
 
                 # 6. 전략
-                view = View(date, time, session, base, date in defects, today, past, past_days, holding, bool(sell_reason or buy))
+                view = View(
+                    date, time, session, base, date in defects, today, past, past_days, holding, bool(sell_reason or buy),
+                    data.days, data.defects, adj_closes,
+                )
                 order = strategy(view)
                 if order:
                     entry = order.kind != "sell"
                     if entry and time == close_time:
                         records.discarded.append(Discard(stamp, order.kind, order.symbol, "after_close"))
+                    elif entry and overnight and final:
+                        records.discarded.append(Discard(stamp, order.kind, order.symbol, "last_day"))
                     elif entry and (cumulative_hit or weekly_hit or daily_hit):
                         records.discarded.append(Discard(stamp, order.kind, order.symbol, "entry_blocked"))
                     elif sell_reason or buy:
@@ -190,6 +218,7 @@ def run(data: MarketData, strategy: Callable[[View], Order | None]) -> Records:
         for symbol in symbols:
             past[symbol][date] = data.bars[symbol].get(date, [])
         past_days.append(date)
+        adj_closes.append(data.daily[KODEX200][date][1])
     return records
 
 
