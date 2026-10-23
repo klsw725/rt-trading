@@ -15,7 +15,7 @@ from typing import NamedTuple
 
 import httpx
 
-from rt_trading import cli, fixtures, market_data, sessions, store, toss
+from rt_trading import cli, engine, fixtures, market_data, sessions, store, toss
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "docs" / "specs" / "v1" / "fixtures"
@@ -337,6 +337,96 @@ def case_base_price() -> None:
         assert [price, bool(problem)] == item["expected"], (item["why"], price, problem)
 
 
+# PRD 03 시뮬레이션 엔진
+
+
+def _prd03() -> dict:
+    return json.loads((FIXTURES / "prd03-engine.json").read_text(encoding="utf-8"))
+
+
+def _engine_data(fixture: dict, case: dict) -> market_data.MarketData:
+    data, violations = _load(_patched(fixture["market"], case["patches"]))
+    assert data, market_data.describe(violations)
+    return data
+
+
+def _run_scripted(data: market_data.MarketData, orders: list[list]) -> tuple[engine.Records, list[str]]:
+    """fixture의 시험용 주문 순서대로 주문을 내는 전략으로 엔진을 돌린다. 전략이 불린 시각도 돌려준다."""
+    planned = {stamp: engine.Order(kind, symbol, reason) for stamp, kind, symbol, reason in orders}
+    calls = []
+
+    def strategy(view: engine.View) -> engine.Order | None:
+        assert all(bar.time <= view.time for bars in view.today.values() for bar in bars), "아직 끝나지 않은 봉이 보인다"
+        assert all(day < view.date for day in view.past_days), "지난 거래일이 아닌 날이 보인다"
+        calls.append(f"{view.date} {view.time}")
+        return planned.get(calls[-1])
+
+    return engine.run(data, strategy), calls
+
+
+def _check_records(records: engine.Records, expected: dict) -> None:
+    for key in ("fills", "trades", "discarded", "limits"):
+        actual = [list(item) for item in getattr(records, key)]
+        assert actual == expected[key], (key, actual)
+    assert records.closes == expected["closes"], records.closes
+    equity = dict(records.equity)
+    assert {stamp: equity[stamp] for stamp in expected["equity"]} == expected["equity"]
+
+
+def case_engine_fills() -> None:
+    fixture = _prd03()
+    case = fixture["fills_case"]
+    records, _ = _run_scripted(_engine_data(fixture, case), case["orders"])
+    _check_records(records, case["expected"])
+    ticks = fixture["ticks_case"]
+    records, _ = _run_scripted(_engine_data(fixture, ticks), ticks["orders"])
+    assert [list(fill) for fill in records.fills] == ticks["expected"]["fills"], records.fills
+
+
+def case_engine_lookahead() -> None:
+    fixture = _prd03()
+    case = fixture["fills_case"]
+    data, cut = _engine_data(fixture, case), "2023-12-14 10:30"
+    changed = {
+        symbol: {
+            date: [
+                bar._replace(open=bar.open + 100, high=bar.high + 100, low=bar.low + 100, close=bar.close + 100)
+                if f"{date} {bar.time}" > cut
+                else bar
+                for bar in bars
+            ]
+            for date, bars in days.items()
+        }
+        for symbol, days in data.bars.items()
+    }
+    before, _ = _run_scripted(data, case["orders"])
+    after, _ = _run_scripted(data._replace(bars=changed), case["orders"])
+    for key in ("fills", "equity"):
+        old, new = getattr(before, key), getattr(after, key)
+        assert [item for item in old if item[0] <= cut] == [item for item in new if item[0] <= cut], key
+        assert old != new, "바꾼 미래 봉이 결과에 닿지 않아 확인이 되지 않는다"
+
+
+def case_engine_minutes() -> None:
+    fixture = _prd03()
+    case = fixture["fills_case"]
+    data = _engine_data(fixture, case)
+    records, calls = _run_scripted(data, case["orders"])
+    minutes = case["expected"]["minutes"]
+    assert len(calls) == len(set(calls)) == minutes and len(records.equity) == minutes + 1, (len(calls), len(records.equity))
+    swapped = data._replace(bars=dict(reversed(data.bars.items())), base=dict(reversed(data.base.items())))
+    assert _run_scripted(swapped, case["orders"])[0] == records
+
+
+def case_engine_limits() -> None:
+    fixture = _prd03()
+    case = fixture["limits_case"]
+    records, _ = _run_scripted(_engine_data(fixture, case), case["orders"])
+    _check_records(records, case["expected"])
+    after = case["expected"]["cash_after_cumulative"]
+    assert {value for stamp, value in records.equity if stamp >= after["from"]} == {after["equity"]}
+
+
 CASES = {
     "01": [
         ("페이지네이션: 세 페이지, 2022-11-23 전 봉과 당일 봉 버림, 오름차순 저장", case_pagination),
@@ -358,6 +448,20 @@ CASES = {
         ("일봉 OHLC 불변식 위반·음수 거래량은 V1_BAR_MALFORMED", case_daily_malformed),
         ("V1_DATA_MISSING: DB 파일, 종목별 행, 가장 늦은 수집 기록", case_data_missing),
         ("기준가: 비율 공식, 0.5원 올림, 2원 이내 무변화, 분배락일, 상승·3% 초과 하락 실패", case_base_price),
+    ],
+    "03": [
+        (
+            "체결과 비용: 다음 체결 가능한 봉, 거래량 0 봉, 호가 단위·2,000원 경계, 동시호가 체결가, 수수료, 인버스 세금,"
+            " 종목 전환, 정수 주, 대기 주문, 마감 매도, 종가 동시호가까지 밀린 매수 취소",
+            case_engine_fills,
+        ),
+        ("미래 봉을 바꿔도 그 전 체결과 자산열이 같다", case_engine_lookahead),
+        ("같은 시각 두 종목 봉은 한 분: 전략 호출은 분마다 한 번, 종목 순서를 바꿔도 같은 결과", case_engine_minutes),
+        (
+            "손실 한도: 첫날·첫 주 기준 자산, 처리 순서, 청산 우선과 진입 취소, 동시 발동 순서, 한 번 세기,"
+            " 다음 날·다음 주 해제, 누적 한도 뒤 현금, 한도 청산의 종가 동시호가 체결",
+            case_engine_limits,
+        ),
     ],
 }
 
