@@ -2,6 +2,7 @@
 
 import contextlib
 import copy
+import csv
 import io
 import json
 import sqlite3
@@ -475,6 +476,93 @@ def case_strategy_lookahead() -> None:
     assert before != after, "바꾼 미래 봉이 결과에 닿지 않아 확인이 되지 않는다"
 
 
+# PRD 05 판정, 보고서, 백테스트 실행
+
+
+def _prd05() -> dict:
+    return json.loads((FIXTURES / "prd05-report.json").read_text(encoding="utf-8"))
+
+
+def _backtest(db: Path, reports: Path, now: str) -> tuple[int, str]:
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = cli.run_backtest(db, reports, lambda: datetime.fromisoformat(now))
+    return code, output.getvalue()
+
+
+def _matches(actual: object, expected: object) -> bool:
+    """JSON 값이 같은지 본다. 소수는 계산 순서에 따른 차이만 허용한다."""
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and actual.keys() == expected.keys() and all(_matches(actual[k], v) for k, v in expected.items())
+    if isinstance(expected, list):
+        return isinstance(actual, list) and len(actual) == len(expected) and all(map(_matches, actual, expected))
+    if isinstance(expected, float):
+        return isinstance(actual, float) and abs(actual - expected) < 1e-12
+    return type(actual) is type(expected) and actual == expected
+
+
+def case_report_values() -> None:
+    fixture = _prd05()
+    with _temp_db() as db:
+        fixtures.build(fixture["market"], db)
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute(
+                "INSERT INTO fetch_runs SELECT ?, symbol, interval, data_start, data_end, bar_count FROM fetch_runs",
+                (fixture["older_fetched_at"],),
+            )
+        code, output = _backtest(db, db.parent / "reports", fixture["now"][0])
+        assert code == 0, output
+        directory = db.parent / "reports" / fixture["expected_directory"]
+        content = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+        assert _matches(content, fixture["expected_report"]), content
+        with (directory / "trades-noise_breakout.csv").open(encoding="utf-8", newline="") as file:
+            trades = list(csv.reader(file))
+        assert trades == fixture["expected_trades"], trades
+    passing = fixture["pass_case"]
+    with _temp_db() as db:
+        fixtures.build(passing["market"], db)
+        code, output = _backtest(db, db.parent / "reports", fixture["now"][0])
+        assert code == 0, output
+        content = json.loads((db.parent / "reports" / fixture["expected_directory"] / "report.json").read_text(encoding="utf-8"))
+    result = content["candidates"][0]
+    assert _matches({key: result[key] for key in passing["expected"]}, passing["expected"]), result
+
+
+def case_report_no_trades() -> None:
+    fixture = _prd05()
+    flat = copy.deepcopy(fixture["market"])
+    for day in flat["days"]:
+        day.pop("bars", None)
+    with _temp_db() as db:
+        fixtures.build(flat, db)
+        code, output = _backtest(db, db.parent / "reports", fixture["now"][0])
+        assert code == 0, output
+        content = json.loads((db.parent / "reports" / fixture["expected_directory"] / "report.json").read_text(encoding="utf-8"))
+    result = content["candidates"][0]
+    assert _matches({key: result[key] for key in fixture["no_trades_expected"]}, fixture["no_trades_expected"]), result
+
+
+def case_report_invalid() -> None:
+    fixture = _prd05()
+    with _temp_db() as db:
+        fixtures.build(_patched(fixture["market"], [fixture["invalid_patch"]]), db)
+        code, output = _backtest(db, db.parent / "reports", fixture["now"][0])
+        assert code == 1 and output.startswith("V1_SESSION_MISMATCH"), output
+        assert not (db.parent / "reports").exists()
+
+
+def case_report_repeatable() -> None:
+    fixture = _prd05()
+    with _temp_db() as db:
+        fixtures.build(fixture["market"], db)
+        reports = db.parent / "reports"
+        for now in fixture["now"]:
+            assert _backtest(db, reports, now)[0] == 0
+        first, second = sorted(reports.iterdir())
+        for name in ("report.json", "trades-noise_breakout.csv"):
+            assert (first / name).read_bytes() == (second / name).read_bytes(), name
+
+
 CASES = {
     "01": [
         ("페이지네이션: 세 페이지, 2022-11-23 전 봉과 당일 봉 버림, 오름차순 저장", case_pagination),
@@ -519,6 +607,16 @@ CASES = {
         ),
         ("엔진과 함께: 시뮬레이션 시작일(15번째 거래일)부터 주문, 손절 뒤 재진입, 마감 청산", case_strategy_run),
         ("미래 봉을 바꿔도 그 전에 낸 주문이 같다", case_strategy_lookahead),
+    ],
+    "05": [
+        (
+            "판정과 보고서: 홀수 거래일 앞뒤 나누기, E_0를 포함한 최대 낙폭, 연환산, 연도별 수익, 거래 수·승률, 통과 판정,"
+            " report.json·trades CSV 형식과 값, 가장 늦은 fetched_at",
+            case_report_values,
+        ),
+        ("거래가 없으면 승률과 거래당 평균 손익이 null", case_report_no_trades),
+        ("검증에 실패하면 보고서 없이 exit 1", case_report_invalid),
+        ("같은 입력으로 두 번 돌리면 실행 시각을 뺀 보고서 내용이 같다", case_report_repeatable),
     ],
 }
 

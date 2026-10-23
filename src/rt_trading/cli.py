@@ -8,10 +8,11 @@ from pathlib import Path
 
 import httpx
 
-from rt_trading import store, toss, v0, v0_acceptance
+from rt_trading import engine, market_data, report, store, strategies, toss, v0, v0_acceptance
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "market.sqlite3"
+REPORT_DIR = ROOT / "data" / "reports"
 SYMBOLS = ("069500", "114800")
 SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
 
@@ -31,8 +32,7 @@ def main() -> None:
     if args.command == "fetch":
         sys.exit(fetch())
     if args.command == "backtest":
-        print("아직 구현하지 않음")
-        sys.exit(1)
+        sys.exit(run_backtest(DB_PATH, REPORT_DIR, lambda: datetime.now(toss.KST)))
     if args.command == "acceptance":
         sys.exit(acceptance.run(args.prd))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
@@ -41,6 +41,24 @@ def main() -> None:
 def fetch() -> int:
     with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
         return run_fetch(http, toss.read_credentials(ROOT), DB_PATH, lambda: datetime.now(toss.KST))
+
+
+def run_backtest(db_path: Path, report_dir: Path, clock: Callable[[], datetime]) -> int:
+    """저장된 시세를 검증하고 노이즈 영역 돌파를 시뮬레이션해 보고서를 만든다.
+
+    검증에 실패하면 PRD 02의 코드를 출력하고 보고서 없이 1을 돌려준다. 후보가 통과하지 못해도 보고서를 만들면 0이다.
+    """
+    data, violations = market_data.load(db_path)
+    if violations:
+        print(market_data.describe(violations))
+        return 1
+    records = engine.run(data, strategies.NoiseBreakout())
+    content = report.build(data, records, max(row[0] for row in store.read(db_path, "fetch_runs")))
+    directory = report_dir / clock().strftime("%Y%m%d-%H%M%S")
+    report.write(directory, content, records.fills)
+    print(report.summary(content))
+    print(f"보고서: {directory}")
+    return 0
 
 
 def run_fetch(http: httpx.Client, credentials: tuple[str, str], db_path: Path, clock: Callable[[], datetime]) -> int:
