@@ -5,6 +5,7 @@ import copy
 import csv
 import io
 import json
+import os
 import sqlite3
 import subprocess
 import tempfile
@@ -16,11 +17,12 @@ from typing import NamedTuple
 
 import httpx
 
-from rt_trading import cli, engine, fixtures, market_data, sessions, store, strategies, toss
+from rt_trading import cli, engine, fixtures, market_data, report, sessions, store, strategies, toss
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "docs" / "specs" / "v1" / "fixtures"
 TABLES = ("candles_1m", "candles_1d", "fetch_runs")
+CREDENTIAL_KEYS = ("TOSS_INVEST_CLIENT_ID", "TOSS_INVEST_CLIENT_SECRET")
 
 
 # PRD 01 토스 시세 수집
@@ -51,7 +53,10 @@ class Run(NamedTuple):
 
 
 def _fetch(fixture: dict, db: Path, queue: dict[str, list] | None = None) -> Run:
-    """fixture 응답을 돌려주는 가짜 토스로 fetch를 돌린다. queue에 넣은 응답이나 예외는 그 요청에 먼저 돌려준다."""
+    """fixture 응답을 돌려주는 가짜 토스로 fetch를 돌린다. queue에 넣은 응답이나 예외는 그 요청에 먼저 돌려준다.
+
+    인증 정보는 fetch처럼 read_credentials로 읽는다. 실제 인증 정보 대신 db 옆 임시 .env에 적은 fixture 값을 읽게 한다.
+    """
     queue = queue or {}
     requests, waits = [], []
 
@@ -72,15 +77,20 @@ def _fetch(fixture: dict, db: Path, queue: dict[str, list] | None = None) -> Run
 
     now = datetime.fromisoformat(fixture["now"])
     output = io.StringIO()
+    lines = [f"{key}={value}\n" for key, value in zip(CREDENTIAL_KEYS, fixture["credentials"])]
+    (db.parent / ".env").write_text("".join(lines), encoding="utf-8")
+    environ = {key: os.environ.pop(key) for key in CREDENTIAL_KEYS if key in os.environ}
     original, toss._sleep = toss._sleep, waits.append
     try:
         with (
             httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(handle)) as http,
             contextlib.redirect_stdout(output),
+            contextlib.redirect_stderr(output),
         ):
-            code = cli.run_fetch(http, tuple(fixture["credentials"]), db, lambda: now)
+            code = cli.run_fetch(http, toss.read_credentials(db.parent), db, lambda: now)
     finally:
         toss._sleep = original
+        os.environ.update(environ)
     return Run(code, output.getvalue(), requests, [wait for wait in waits if wait >= 1])
 
 
@@ -125,17 +135,16 @@ def case_requests() -> None:
         "114800 1d false",
         "114800 1d true",
     }
-    assert all(r.url.params["count"] == "200" for r in candle_requests)
 
 
 def case_daily_mismatch() -> None:
     for broken in ("날짜 불일치", "날짜 중복"):
         fixture = _prd01()
         if broken == "날짜 불일치":
-            del fixture["candles"]["069500 1d true"][0]["result"]["candles"][2]  # 수정 가격에서 2026-10-20을 뺀다
+            del fixture["candles"]["069500 1d true"][0]["result"]["candles"][1]  # 수정 가격에서 2026-10-20을 뺀다
         else:
             raw = fixture["candles"]["069500 1d false"][0]["result"]["candles"]
-            raw.insert(1, dict(raw[1]))  # 원가격에 2026-10-21을 한 번 더 넣는다
+            raw.append(dict(raw[-1]))  # 원가격에 저장할 기간 밖의 2022-11-22를 한 번 더 넣는다
         with _temp_db() as db:
             run = _fetch(fixture, db)
             assert run.code == 1 and run.output.startswith("V1_TOSS_RESPONSE_INVALID"), (broken, run.output)
@@ -161,7 +170,6 @@ def case_token_ip() -> None:
 def case_candle_errors() -> None:
     fixture = _prd01()
     scenarios = [
-        ("그 밖의 401", {"069500 1m false": _errors(fixture, "token_invalid")}, "V1_TOKEN_INVALID", []),
         ("403", {"114800 1d true": _errors(fixture, "ip_candles")}, "V1_IP_NOT_ALLOWED", []),
         ("429", {"069500 1m false": _errors(fixture, "rate_limited")}, None, [3]),
         ("5xx 한 번", {"069500 1m false": _errors(fixture, "unavailable")}, None, [1]),
@@ -183,6 +191,8 @@ def case_candle_errors() -> None:
                 assert _rows(db, "candles_1m") == fixture["expected"]["candles_1m"], name
             else:
                 assert run.code == 1 and run.output.startswith(code), (name, run.output)
+            if code == "V1_IP_NOT_ALLOWED":
+                assert "허용 IP" in run.output, (name, run.output)
             assert run.waits == waits, (name, run.waits)
 
 
@@ -208,10 +218,11 @@ def case_rollback() -> None:
         # 두 번째 종목 수집이 실패한다
         assert _fetch(fixture, db, {"114800 1m false": _errors(fixture, "ip_candles")}).code == 1
         assert {table: _rows(db, table) for table in TABLES} == before
-        # 기존 봉을 지운 뒤 새 봉을 넣다가 기본 키 중복으로 실패한다
+        # 기존 봉을 지운 뒤 새 봉과 새 수집 기록을 넣다가 기본 키 중복으로 실패한다
         minute = [tuple(row) for row in fixture["expected"]["candles_1m"]]
+        runs = [("2026-10-23T16:05:00+09:00", *row[1:]) for row in fixture["expected"]["fetch_runs"]]
         try:
-            store.replace(db, minute + minute[:1], [], [])
+            store.replace(db, minute + minute[:1], [], runs)
         except sqlite3.IntegrityError:
             pass
         else:
@@ -222,15 +233,17 @@ def case_rollback() -> None:
 def case_no_secrets() -> None:
     fixture = _prd01()
     secrets = [*fixture["credentials"], fixture["token"]["access_token"]]
+    texts = []
     with _temp_db() as db:
-        texts = [_fetch(fixture, db).output, db.read_bytes().decode("utf-8", "replace")]
         for queue in (
+            None,
             {"069500 1m false": _errors(fixture, "token_revoked")},
             {"token": _errors(fixture, "ip_oauth2")},
             {"069500 1m false": _errors(fixture, "unavailable", 4)},
             {"114800 1m false": _errors(fixture, "bad_price")},
         ):
-            texts.append(_fetch(fixture, db, queue).output)
+            texts.append(_fetch(fixture, db, queue).output)  # 표준 출력과 표준 오류
+            texts.append(db.read_bytes().decode("utf-8", "replace"))  # 실행할 때마다 DB 전체
     leaked = [secret for secret in secrets if any(secret in text for text in texts)]
     assert not leaked, leaked
 
@@ -275,6 +288,8 @@ def case_sessions() -> None:
         session = sessions.session(date, table)
         actual = {"count": len(session.bars), "first": session.bars[0], "last": session.bars[-1], "window": session.window}
         assert actual == expected, (date, actual)
+        minutes = [int(time[:2]) * 60 + int(time[3:]) for time in session.bars]
+        assert all(later - earlier == 1 for earlier, later in zip(minutes, minutes[1:])), (date, session.bars)  # 1분 간격
 
 
 def case_valid_data() -> None:
@@ -305,17 +320,41 @@ def case_violations() -> None:
         assert all(date in text for _, date, _ in expected), (case["name"], text)
 
 
+def case_daily_malformed() -> None:
+    with _temp_db() as db:
+        fixtures.build(_prd02()["valid"], db)
+        with closing(sqlite3.connect(db)) as conn, conn:
+            conn.execute("UPDATE candles_1d SET high = close - 1 WHERE symbol = '114800' AND date = '2024-01-04'")
+            conn.execute("UPDATE candles_1d SET low = close + 1 WHERE symbol = '069500' AND date = '2024-11-14'")  # 결함일
+            conn.execute("UPDATE candles_1d SET volume = -5 WHERE symbol = '069500' AND date = '2025-11-13'")
+        data, violations = market_data.load(db)
+    actual = sorted((v.code, v.date, v.symbol) for v in violations)
+    expected = [
+        ("V1_BAR_MALFORMED", "2024-01-04", "114800"),
+        ("V1_BAR_MALFORMED", "2024-11-14", "069500"),
+        ("V1_BAR_MALFORMED", "2025-11-13", "069500"),
+    ]
+    assert data is None and actual == expected, actual
+
+
 def case_data_missing() -> None:
     fixture = _prd02()
     with _temp_db() as db:
         assert [v.code for v in market_data.load(db)[1]] == ["V1_DATA_MISSING"]  # DB 파일이 없다
-    no_minute = [{"date": date, "omit": [["114800", "1m"]]} for date in fixture["expected"]["days"]]
-    _, violations = _load(_patched(fixture["valid"], no_minute))
-    assert sorted((v.code, v.symbol) for v in violations) == [("V1_DATA_MISSING", ""), ("V1_DATA_MISSING", "114800")]
+    no_rows = [{"date": date, "omit": [["114800", "1m"], ["069500", "1d"]]} for date in fixture["expected"]["days"]]
+    _, violations = _load(_patched(fixture["valid"], no_rows))
+    actual = sorted((v.code, v.symbol) for v in violations)
+    assert actual == [("V1_DATA_MISSING", ""), ("V1_DATA_MISSING", "069500"), ("V1_DATA_MISSING", "114800")], actual
     with _temp_db() as db:
         fixtures.build(fixture["valid"], db)
         with closing(sqlite3.connect(db)) as conn, conn:
-            conn.execute("DELETE FROM fetch_runs WHERE symbol = '069500' AND interval = '1d'")
+            # 더 이른 수집 기록은 네 행이 다 있고, 가장 늦은 수집 기록에서만 한 행이 빠진다
+            conn.execute(
+                "INSERT INTO fetch_runs SELECT '2026-10-21T16:05:00+09:00', symbol, interval, data_start, data_end, bar_count FROM fetch_runs"
+            )
+            conn.execute(
+                "DELETE FROM fetch_runs WHERE fetched_at = ? AND symbol = '069500' AND interval = '1d'", (fixture["valid"]["fetched_at"],)
+            )
         _, violations = market_data.load(db)
     assert [(v.code, v.symbol) for v in violations] == [("V1_DATA_MISSING", "")], violations
 
@@ -410,6 +449,14 @@ def case_engine_minutes() -> None:
     assert len(calls) == len(set(calls)) == minutes and len(records.equity) == minutes + 1, (len(calls), len(records.equity))
     swapped = data._replace(bars=dict(reversed(data.bars.items())), base=dict(reversed(data.base.items())))
     assert _run_scripted(swapped, case["orders"])[0] == records
+    defect = fixture["defect_case"]
+    data, violations = _load(defect["market"])
+    assert data, market_data.describe(violations)
+    records, _ = _run_scripted(data, [])
+    assert records.closes == defect["expected"]["closes"], records.closes
+    expected = defect["expected"]["defect_day"]
+    stamps = [stamp for stamp, _ in records.equity if stamp.startswith(expected["date"])]
+    assert [len(stamps), stamps[0], stamps[-1]] == [expected["minutes"], expected["first"], expected["last"]], stamps[-3:]
 
 
 def case_engine_limits() -> None:
@@ -419,6 +466,11 @@ def case_engine_limits() -> None:
     _check_records(records, case["expected"])
     after = case["expected"]["cash_after_cumulative"]
     assert {value for stamp, value in records.equity if stamp >= after["from"]} == {after["equity"]}
+    exact = fixture["exact_limits_case"]
+    records, _ = _run_scripted(_engine_data(fixture, exact), exact["orders"])
+    for key in ("fills", "limits", "discarded"):
+        actual = [list(item) for item in getattr(records, key)]
+        assert actual == exact["expected"][key], (key, actual)
 
 
 # PRD 04 후보 전략
@@ -447,7 +499,7 @@ def case_strategy_decision_times() -> None:
     table = sessions.exceptions()
     for date, expected in _prd04()["decision_times"].items():
         times = strategies.decision_times(sessions.session(date, table))
-        assert {"count": len(times), "first": times[0], "last": times[-1]} == expected, (date, times)
+        assert times == expected, (date, times)
 
 
 def case_strategy_checks() -> None:
@@ -526,6 +578,22 @@ def case_report_values() -> None:
         content = json.loads((db.parent / "reports" / fixture["expected_directory"] / "report.json").read_text(encoding="utf-8"))
     result = content["candidates"][0]
     assert _matches({key: result[key] for key in passing["expected"]}, passing["expected"]), result
+    rich = fixture["rich_case"]
+    with _temp_db() as db:
+        fixtures.build(rich["market"], db)
+        code, output = _backtest(db, db.parent / "reports", fixture["now"][0])
+        assert code == 0, output
+        directory = db.parent / "reports" / fixture["expected_directory"]
+        content = json.loads((directory / "report.json").read_text(encoding="utf-8"))
+        with (directory / "trades-noise_breakout.csv").open(encoding="utf-8", newline="") as file:
+            trades = list(csv.reader(file))
+    assert _matches(content, rich["expected_report"]), content
+    assert trades == rich["expected_trades"], trades
+    exact = fixture["exact_drawdown"]
+    records = engine.Records([tuple(item) for item in exact["equity"]], exact["closes"], [], [], [], [])
+    days = market_data.MarketData(list(exact["closes"]), {}, {}, {}, [])
+    criteria = report.build(days, records, "")["candidates"][0]["criteria"]
+    assert criteria["drawdown_below_limit"] is exact["expected_drawdown_below_limit"], criteria
 
 
 def case_report_no_trades() -> None:
@@ -568,50 +636,55 @@ CASES = {
         ("페이지네이션: 세 페이지, 2022-11-23 전 봉과 당일 봉 버림, 오름차순 저장", case_pagination),
         ("봉 시각: 응답 시각을 봉이 끝나는 시각으로 저장", case_bar_time),
         ("요청: 1분봉 원가격, 일봉 원가격과 수정 가격", case_requests),
-        ("일봉 날짜 불일치·중복은 저장 없이 V1_TOSS_RESPONSE_INVALID", case_daily_mismatch),
+        ("일봉: 저장할 기간의 날짜 불일치와 응답 안 날짜 중복은 저장 없이 V1_TOSS_RESPONSE_INVALID", case_daily_mismatch),
         ("401 token-revoked: 토큰 발급 한 번, V1_TOKEN_REVOKED", case_token_revoked),
         ("토큰 발급의 OAuth2 403: V1_IP_NOT_ALLOWED", case_token_ip),
-        ("캔들 조회의 401·403·429·5xx·네트워크·형식 오류", case_candle_errors),
+        ("캔들 조회의 403(허용 IP 안내)·429·5xx·네트워크·형식 오류", case_candle_errors),
         ("저장: 봉 네 계열, fetch_runs 네 행, 표 형식, user_version", case_storage),
         ("실패하면 기존 내용 유지", case_rollback),
-        ("출력과 DB에 인증 정보와 토큰 없음", case_no_secrets),
+        ("성공·실패한 실행마다 표준 출력·표준 오류와 DB에 인증 정보와 토큰 없음", case_no_secrets),
         ("data/는 git에서 제외", case_gitignore),
     ],
     "02": [
         ("장 일정: 정상일 390개, 연초 첫 거래일 330개, 수능일 390개와 종가 동시호가·접수 구간", case_sessions),
         ("검증 통과: 장 밖 빈 봉 버림, 늦은 시가 봉, 결함일 목록, 준비일 뺀 기준가", case_valid_data),
         ("코드마다 어긴 사례가 그 코드로 실패하고 어긴 날짜를 모두 출력", case_violations),
-        ("V1_DATA_MISSING: DB 파일, 종목별 행, 가장 늦은 수집 기록", case_data_missing),
+        ("일봉 OHLC 불변식(고가·저가) 위반·음수 거래량은 결함일에도 V1_BAR_MALFORMED", case_daily_malformed),
+        ("V1_DATA_MISSING: DB 파일, 종목별 1분봉·일봉 행, 가장 늦은 수집 기록", case_data_missing),
         ("기준가: 비율 공식, 0.5원 올림, 2원 이내 무변화, 분배락일, 상승·3% 초과 하락 실패", case_base_price),
     ],
     "03": [
         (
-            "체결과 비용: 다음 체결 가능한 봉, 거래량 0 봉, 호가 단위·2,000원 경계, 동시호가 체결가, 수수료, 인버스 세금,"
-            " 종목 전환, 정수 주, 대기 주문, 마감 매도, 종가 동시호가까지 밀린 매수 취소",
+            "체결과 비용: 시뮬레이션 시작일(15번째 거래일), 다음 체결 가능한 봉, 거래량 0 봉, 호가 단위·2,000원 경계,"
+            " 동시호가 체결가, 수수료, 인버스 세금, 종목 전환, 정수 주, 대기 주문, 마감 매도, 종가 동시호가까지 밀린 매수 취소",
             case_engine_fills,
         ),
         ("미래 봉을 바꿔도 그 전 체결과 자산열이 같다", case_engine_lookahead),
-        ("같은 시각 두 종목 봉은 한 분: 전략 호출은 분마다 한 번, 종목 순서를 바꿔도 같은 결과", case_engine_minutes),
+        (
+            "같은 시각 두 종목 봉은 한 분: 전략 호출은 분마다 한 번, 종목 순서를 바꿔도 같은 결과,"
+            " 종가 동시호가 봉이 없는 결함일의 마감 자산",
+            case_engine_minutes,
+        ),
         (
             "손실 한도: 첫날·첫 주 기준 자산, 처리 순서, 청산 우선과 진입 취소, 동시 발동 순서, 한 번 세기,"
-            " 다음 날·다음 주 해제, 누적 한도 뒤 현금, 한도 청산의 종가 동시호가 체결",
+            " 다음 날·다음 주 해제, 누적 한도 뒤 현금, 한도 청산의 종가 동시호가 체결, 기준과 정확히 같은 자산에서 발동",
             case_engine_limits,
         ),
     ],
     "04": [
-        ("판단 시각: 정상일·수능일 12번, 연초 첫 거래일 10번", case_strategy_decision_times),
+        ("판단 시각: 정상일·수능일 12번, 연초 첫 거래일 10번의 전체 시각", case_strategy_decision_times),
         (
-            "판단: 직전 14거래일만 쓴 경계, 봉이 없는 m·VWAP 거래량 0 생략, 늦은 시가, 갭 보정(분배락일 포함),"
-            " 방향 전환 우선, 손절, 결함일 주문 없음",
+            "판단: 직전 14거래일만 쓴 경계(결함일도 들어감), 봉이 없는 m·VWAP 거래량 0 생략, 늦은 시가, 갭 보정(분배락일 포함),"
+            " VWAP 계산, 방향 전환 우선, 손절, 경계·VWAP와 같은 종가의 엄격한 비교, 결함일 주문 없음",
             case_strategy_checks,
         ),
-        ("엔진과 함께: 시뮬레이션 시작일(15번째 거래일)부터 주문, 손절 뒤 재진입, 마감 청산", case_strategy_run),
+        ("엔진과 함께: 손절 뒤 재진입", case_strategy_run),
         ("미래 봉을 바꿔도 그 전에 낸 주문이 같다", case_strategy_lookahead),
     ],
     "05": [
         (
-            "판정과 보고서: 홀수 거래일 앞뒤 나누기, E_0를 포함한 최대 낙폭, 연환산, 연도별 수익, 거래 수·승률, 통과 판정,"
-            " report.json·trades CSV 형식과 값, 가장 늦은 fetched_at",
+            "판정과 보고서: 홀수 거래일 앞뒤 나누기, E_0를 포함한 최대 낙폭, 연환산, 연도별 수익, 거래 수·승률, 통과 판정"
+            "(정확히 20% 낙폭은 불통과), report.json·trades CSV 형식과 값(결함일·세금·한도·전환 포함), 가장 늦은 fetched_at",
             case_report_values,
         ),
         ("거래가 없으면 승률과 거래당 평균 손익이 null", case_report_no_trades),

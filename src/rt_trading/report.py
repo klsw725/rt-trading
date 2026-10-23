@@ -21,9 +21,11 @@ def build(data: MarketData, records: engine.Records, fetched_at: str) -> dict:
     days, final = len(closes), closes[-1][1]
     boundary = closes[days // 2 - 1][1] if days // 2 else start  # 앞 기간은 처음 floor(N/2)거래일
     peak = drawdown = 0
+    below_limit = True
     for _, equity in records.equity:  # 첫 값 E_0(시작 자금)부터 본다
         peak = max(peak, equity)
         drawdown = max(drawdown, 1 - equity / peak)
+        below_limit = below_limit and equity * 5 > peak * 4  # 낙폭 20% 미만인지는 소수 오차 없이 정수로 판정한다
     year_end = {date[:4]: equity for date, equity in closes}
     yearly, previous = {}, start
     for year, equity in year_end.items():
@@ -33,7 +35,7 @@ def build(data: MarketData, records: engine.Records, fetched_at: str) -> dict:
     first, second = boundary / start - 1, final / boundary - 1
     criteria = {
         "net_positive": final > start,
-        "drawdown_below_limit": drawdown < -LOSS_LIMITS["cumulative"],
+        "drawdown_below_limit": below_limit,
         "both_halves_positive": first > 0 and second > 0,
     }
     simulation_start, simulation_end = closes[0][0], closes[-1][0]

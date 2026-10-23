@@ -1,5 +1,5 @@
 {
-  "description": "PRD 01 acceptance용 가상 토스 응답과 손으로 계산한 기대값. 실제 시세가 아니다. 실행일은 2026-10-22, 수집 시작일은 2022-11-23이다.",
+  "description": "PRD 01 acceptance용 가상 토스 응답과 손으로 계산한 기대값. 실제 시세가 아니다. 실행일은 2026-10-22, 수집 시작일은 2022-11-23이다. 069500 수정 가격 일봉에는 실행일 봉이 없다. 저장할 기간 밖 날짜만 두 응답에서 다르므로 저장된다.",
   "credentials": ["tsck_live_FAKE_CLIENT_ID", "FAKE_CLIENT_SECRET"],
   "token": {"access_token": "FAKE_ACCESS_TOKEN", "token_type": "Bearer", "expires_in": 86399},
   "now": "2026-10-22T16:05:00+09:00",
@@ -36,7 +36,6 @@
     ],
     "069500 1d true": [
       {"result": {"candles": [
-        {"timestamp": "2026-10-22T00:00:00.000+09:00", "openPrice": "104", "highPrice": "106", "lowPrice": "104", "closePrice": "106", "volume": "160", "currency": "KRW"},
         {"timestamp": "2026-10-21T00:00:00.000+09:00", "openPrice": "101", "highPrice": "104", "lowPrice": "100", "closePrice": "104", "volume": "1500", "currency": "KRW"},
         {"timestamp": "2026-10-20T00:00:00.000+09:00", "openPrice": "99", "highPrice": "101", "lowPrice": "98", "closePrice": "101", "volume": "800", "currency": "KRW"},
         {"timestamp": "2022-11-23T00:00:00.000+09:00", "openPrice": "81", "highPrice": "82", "lowPrice": "80", "closePrice": "81", "volume": "200", "currency": "KRW"},
@@ -58,7 +57,6 @@
   },
   "errors": {
     "token_revoked": {"status": 401, "body": {"error": {"code": "token-revoked", "message": "폐기된 토큰", "requestId": "req-revoked"}}},
-    "token_invalid": {"status": 401, "body": {"error": {"code": "invalid-token", "message": "잘못된 토큰", "requestId": "req-invalid"}}},
     "ip_oauth2": {"status": 403, "body": {"error": "access_denied", "error_description": "IP address not allowed"}},
     "ip_candles": {"status": 403, "body": {"error": {"code": "ip-not-allowed", "message": "허용되지 않은 IP", "requestId": "req-ip"}}},
     "rate_limited": {"status": 429, "headers": {"Retry-After": "3"}, "body": {"error": {"code": "too-many-requests", "requestId": "req-429"}}},

@@ -129,8 +129,6 @@ def _check_bars(symbol: str, date: str, bars: list[Bar], session: sessions.Sessi
     """그날 1분봉을 확인한다. 결함일에는 장 일정, 시가·종가 봉, 접수 구간을 확인하지 않는다."""
     found = []
     times = [bar.time for bar in bars]
-    if any(a >= b for a, b in zip(times, times[1:])):
-        found.append(Violation("V1_BAR_MALFORMED", date, symbol, "봉 시각이 중복되거나 거꾸로 간다"))
     malformed = [
         bar.time
         for bar in bars
