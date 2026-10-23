@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 
-from rt_trading import engine, market_data, report, store, strategies, toss, v0, v0_acceptance, v2_acceptance
+from rt_trading import engine, market_data, report, store, strategies, toss, v0, v0_acceptance, v2_acceptance, v2_backtest
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "market.sqlite3"
@@ -28,6 +28,7 @@ def main() -> None:
     checks.add_argument("--prd", choices=sorted(acceptance.CASES))
     commands.add_parser("v0-check", help="v0 일봉 빠른 확인을 실행한다")
     commands.add_parser("v0-acceptance", help="v0 acceptance를 실행한다")
+    commands.add_parser("v2-backtest", help="저장된 두 DB로 v2 두 단계 백테스트를 한다")
     v2_checks = commands.add_parser("v2-acceptance", help="v2 acceptance를 네트워크 없이 실행한다")
     v2_checks.add_argument("--prd", choices=sorted(v2_acceptance.CASES))
     args = parser.parse_args()
@@ -37,6 +38,8 @@ def main() -> None:
         sys.exit(run_backtest(DB_PATH, REPORT_DIR, lambda: datetime.now(toss.KST)))
     if args.command == "acceptance":
         sys.exit(acceptance.run(args.prd))
+    if args.command == "v2-backtest":
+        sys.exit(v2_backtest.run(v0.DB_PATH, DB_PATH, REPORT_DIR, lambda: datetime.now(toss.KST)))
     if args.command == "v2-acceptance":
         sys.exit(v2_acceptance.run(args.prd))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())

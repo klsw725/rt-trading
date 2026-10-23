@@ -17,6 +17,27 @@ TRADE_COLUMNS = ["time", "symbol", "side", "quantity", "price", "commission", "t
 
 def build(data: MarketData, records: engine.Records, fetched_at: str) -> dict:
     """report.json 내용. 실행 시각은 넣지 않아 같은 입력이면 같은 내용이 나온다."""
+    days = list(records.closes)
+    simulation_start, simulation_end = days[0], days[-1]
+    return {
+        "run": {
+            "fetched_at": fetched_at,
+            "data_start": data.days[0],
+            "data_end": data.days[-1],
+            "simulation_start": simulation_start,
+            "simulation_end": simulation_end,
+            "trading_days": len(days),
+            "initial_capital": engine.INITIAL_CASH,
+            "commission_rate": COMMISSION_RATE,
+            "loss_limits": LOSS_LIMITS,
+            "defect_days": [day for day in data.defects if simulation_start <= day <= simulation_end],
+        },
+        "candidates": [{"id": CANDIDATE, "params": strategies.PARAMS, **metrics(records)}],
+    }
+
+
+def metrics(records: engine.Records) -> dict:
+    """후보 하나의 지표와 통과 판정. id와 params는 부르는 쪽이 붙인다."""
     start, closes = engine.INITIAL_CASH, list(records.closes.items())
     days, final = len(closes), closes[-1][1]
     boundary = closes[days // 2 - 1][1] if days // 2 else start  # 앞 기간은 처음 floor(N/2)거래일
@@ -38,41 +59,22 @@ def build(data: MarketData, records: engine.Records, fetched_at: str) -> dict:
         "drawdown_below_limit": below_limit,
         "both_halves_positive": first > 0 and second > 0,
     }
-    simulation_start, simulation_end = closes[0][0], closes[-1][0]
     return {
-        "run": {
-            "fetched_at": fetched_at,
-            "data_start": data.days[0],
-            "data_end": data.days[-1],
-            "simulation_start": simulation_start,
-            "simulation_end": simulation_end,
-            "trading_days": days,
-            "initial_capital": start,
-            "commission_rate": COMMISSION_RATE,
-            "loss_limits": LOSS_LIMITS,
-            "defect_days": [day for day in data.defects if simulation_start <= day <= simulation_end],
-        },
-        "candidates": [
-            {
-                "id": CANDIDATE,
-                "params": strategies.PARAMS,
-                "final_equity": final,
-                "total_return": final / start - 1,
-                "annualized_return": (final / start) ** (252 / days) - 1,
-                "max_drawdown": drawdown,
-                "first_half_return": first,
-                "second_half_return": second,
-                "yearly_returns": yearly,
-                "trade_count": len(pnls),
-                "win_rate": sum(pnl > 0 for pnl in pnls) / len(pnls) if pnls else None,
-                "avg_trade_pnl": sum(pnls) / len(pnls) if pnls else None,
-                "commission_total": sum(fill.fee for fill in records.fills),
-                "tax_total": sum(fill.tax for fill in records.fills),
-                "limit_triggers": {kind: sum(hit == kind for _, hit in records.limits) for kind in LIMIT_KINDS},
-                "criteria": criteria,
-                "passed": all(criteria.values()),
-            }
-        ],
+        "final_equity": final,
+        "total_return": final / start - 1,
+        "annualized_return": (final / start) ** (252 / days) - 1,
+        "max_drawdown": drawdown,
+        "first_half_return": first,
+        "second_half_return": second,
+        "yearly_returns": yearly,
+        "trade_count": len(pnls),
+        "win_rate": sum(pnl > 0 for pnl in pnls) / len(pnls) if pnls else None,
+        "avg_trade_pnl": sum(pnls) / len(pnls) if pnls else None,
+        "commission_total": sum(fill.fee for fill in records.fills),
+        "tax_total": sum(fill.tax for fill in records.fills),
+        "limit_triggers": {kind: sum(hit == kind for _, hit in records.limits) for kind in LIMIT_KINDS},
+        "criteria": criteria,
+        "passed": all(criteria.values()),
     }
 
 
@@ -80,7 +82,12 @@ def write(directory: Path, content: dict, fills: list[engine.Fill]) -> None:
     """report.json과 trades-{id}.csv를 저장한다."""
     directory.mkdir(parents=True)
     (directory / "report.json").write_text(json.dumps(content, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    with (directory / f"trades-{CANDIDATE}.csv").open("w", newline="", encoding="utf-8") as file:
+    write_trades(directory / f"trades-{CANDIDATE}.csv", fills)
+
+
+def write_trades(path: Path, fills: list[engine.Fill]) -> None:
+    """체결 내역 CSV를 저장한다."""
+    with path.open("w", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
         writer.writerow(TRADE_COLUMNS)
         for fill in fills:

@@ -1,17 +1,19 @@
 """v2 acceptance. PRD별 사례를 네트워크 없이 실행하고 결과를 JSON으로 출력한다."""
 
 import contextlib
+import csv
+import io
 import json
 import sqlite3
 import tempfile
 from collections.abc import Iterator
 from contextlib import closing
 from datetime import date as Date
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from rt_trading import engine, fixtures, market_data, sessions, v2_stage1, v2_strategies
+from rt_trading import engine, fixtures, market_data, sessions, v2_backtest, v2_stage1, v2_strategies
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "docs" / "specs" / "v2" / "fixtures"
@@ -348,6 +350,77 @@ def case_strategy_defect() -> None:
     _strategy_checks("defect")
 
 
+# PRD 04 판정, 보고서, 실행
+
+
+def _prd04() -> dict:
+    return json.loads((FIXTURES / "prd04-backtest.json").read_text(encoding="utf-8"))
+
+
+@contextlib.contextmanager
+def _databases(fixture: dict, change: dict | None = None) -> Iterator[tuple[Path, Path]]:
+    """임시 디렉터리에 1단계 DB와 시세 DB를 만든다. change는 사례마다의 변형(없앨 DB, 1단계 변형, 남길 거래일 수, 덧붙일 날)이다."""
+    change = change or {}
+    market = {**fixture["market"], "days": fixture["market"]["days"][: change.get("days")] + change.get("append", [])}
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = {"v0": Path(tmp) / "v0.sqlite3", "market": Path(tmp) / "market.sqlite3"}
+        _build(fixture["stage1"], paths["v0"], change.get("stage1"))
+        fixtures.build(market, paths["market"])
+        if "missing" in change:
+            paths[change["missing"]].unlink()
+        yield paths["v0"], paths["market"]
+
+
+def _backtest(v0_path: Path, market_path: Path, now: str) -> tuple[int, str]:
+    """v2-backtest와 같은 흐름으로 돌린다. 보고서는 DB 옆의 reports/에 만든다."""
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = v2_backtest.run(v0_path, market_path, v0_path.parent / "reports", lambda: datetime.fromisoformat(now))
+    return code, output.getvalue()
+
+
+def case_backtest_data() -> None:
+    fixture = _prd04()
+    for failure in fixture["failures"]:
+        with _databases(fixture, failure) as (v0_path, market_path):
+            code, output = _backtest(v0_path, market_path, fixture["now"][0])
+            assert code == 1 and output.startswith(failure["expected"]), (failure["name"], output)
+            assert not (v0_path.parent / "reports").exists(), failure["name"]
+    boundary = fixture["boundary"]
+    with _databases(fixture, boundary) as (v0_path, market_path):
+        code, output = _backtest(v0_path, market_path, fixture["now"][0])
+        assert code == 0 and (v0_path.parent / "reports" / fixture["expected"]["directory"]).is_dir(), (boundary["name"], output)
+
+
+def case_backtest_reports() -> None:
+    fixture = _prd04()
+    expected = fixture["expected"]
+    with _databases(fixture) as (v0_path, market_path):
+        code, output = _backtest(v0_path, market_path, fixture["now"][0])
+        assert code == 0, output
+        directory = v0_path.parent / "reports" / expected["directory"]
+        files = {path.name: path.read_text(encoding="utf-8") for path in directory.iterdir()}
+    assert sorted(files) == expected["files"], sorted(files)
+    for name in ("stage1", "report", "verdict"):
+        content = json.loads(files[f"{name}.json"])
+        assert _matches(content, expected[name]), (name, content)
+    for candidate, rows in expected["trades"].items():
+        assert list(csv.reader(io.StringIO(files[f"trades-{candidate}.csv"]))) == rows, (candidate, files[f"trades-{candidate}.csv"])
+
+
+def case_backtest_repeatable() -> None:
+    fixture = _prd04()
+    with _databases(fixture) as (v0_path, market_path):
+        reports = v0_path.parent / "reports"
+        for now in fixture["now"]:
+            assert _backtest(v0_path, market_path, now)[0] == 0
+        first, second = sorted(reports.iterdir())
+        names = sorted(path.name for path in first.iterdir())
+        assert names == sorted(path.name for path in second.iterdir()), names
+        for name in names:
+            assert (first / name).read_bytes() == (second / name).read_bytes(), name
+
+
 CASES = {
     "01": [
         ("1단계 일봉 확인: 표·열·기본 키, 0 이하 가격, 인버스 상장 뒤 거래일, 인버스 전 200거래일(정확히 200일은 통과)", case_stage1_data),
@@ -375,6 +448,18 @@ CASES = {
         ("며칠 보유 후보의 주문 시각: 마감 10분 전 봉(정상일·연초 15:20, 수능일 16:20), ④의 수능일 종가 동시호가 분", case_strategy_times),
         ("③: 개장 30분 뒤 종가가 기준가보다 클 때만 마감 30분 전에 사고, 장 유형별 시각과 세 건너뛰기", case_strategy_last_half_hour),
         ("결함일에는 주문하지 않는다", case_strategy_defect),
+    ],
+    "04": [
+        (
+            "데이터: 두 DB 중 하나라도 없음, 1단계 일봉 확인, v1 검증, 2단계 거래일 수(200일 실패, 201일 통과),"
+            " 마지막 거래일 종가 동시호가 봉 확인에 실패하면 보고서 없이 exit 1",
+            case_backtest_data,
+        ),
+        (
+            "단계 잇기와 최종 판정(1단계 불통과 후보는 2단계 없음, ③은 2단계만), stage1.json·report.json·trades CSV·verdict.json의 형식과 값",
+            case_backtest_reports,
+        ),
+        ("같은 입력으로 두 번 실행하면 실행 시각을 뺀 보고서 내용이 같다", case_backtest_repeatable),
     ],
 }
 
