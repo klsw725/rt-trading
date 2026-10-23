@@ -15,7 +15,7 @@ from typing import NamedTuple
 
 import httpx
 
-from rt_trading import cli, engine, fixtures, market_data, sessions, store, toss
+from rt_trading import cli, engine, fixtures, market_data, sessions, store, strategies, toss
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "docs" / "specs" / "v1" / "fixtures"
@@ -371,11 +371,9 @@ def case_engine_fills() -> None:
     assert [list(fill) for fill in records.fills] == ticks["expected"]["fills"], records.fills
 
 
-def case_engine_lookahead() -> None:
-    fixture = _prd03()
-    case = fixture["fills_case"]
-    data, cut = _engine_data(fixture, case), "2023-12-14 10:30"
-    changed = {
+def _shift_after(data: market_data.MarketData, cut: str) -> market_data.MarketData:
+    """cut 뒤 봉의 가격을 모두 100원 올린 데이터."""
+    bars = {
         symbol: {
             date: [
                 bar._replace(open=bar.open + 100, high=bar.high + 100, low=bar.low + 100, close=bar.close + 100)
@@ -387,8 +385,15 @@ def case_engine_lookahead() -> None:
         }
         for symbol, days in data.bars.items()
     }
+    return data._replace(bars=bars)
+
+
+def case_engine_lookahead() -> None:
+    fixture = _prd03()
+    case = fixture["fills_case"]
+    data, cut = _engine_data(fixture, case), "2023-12-14 10:30"
     before, _ = _run_scripted(data, case["orders"])
-    after, _ = _run_scripted(data._replace(bars=changed), case["orders"])
+    after, _ = _run_scripted(_shift_after(data, cut), case["orders"])
     for key in ("fills", "equity"):
         old, new = getattr(before, key), getattr(after, key)
         assert [item for item in old if item[0] <= cut] == [item for item in new if item[0] <= cut], key
@@ -413,6 +418,61 @@ def case_engine_limits() -> None:
     _check_records(records, case["expected"])
     after = case["expected"]["cash_after_cumulative"]
     assert {value for stamp, value in records.equity if stamp >= after["from"]} == {after["equity"]}
+
+
+# PRD 04 후보 전략
+
+
+def _prd04() -> dict:
+    return json.loads((FIXTURES / "prd04-strategies.json").read_text(encoding="utf-8"))
+
+
+def _strategy_view(data: market_data.MarketData, check: dict) -> engine.View:
+    """엔진이 그 분에 전략에 넘기는 것과 같은 View. zero_volume_until까지 KODEX 200 거래량을 0으로 바꿀 수 있다."""
+    date, time = check["date"], check["time"]
+    past_days = data.days[: data.days.index(date)]
+    today = {symbol: [bar for bar in days[date] if bar.time <= time] for symbol, days in data.bars.items()}
+    if check.get("zero_volume_until"):
+        today[strategies.KODEX200] = [
+            bar._replace(volume=0) if bar.time <= check["zero_volume_until"] else bar for bar in today[strategies.KODEX200]
+        ]
+    past = {symbol: {day: days[day] for day in past_days} for symbol, days in data.bars.items()}
+    base = {symbol: data.base[symbol][date] for symbol in data.bars}
+    holding = check["holding"] and engine.Holding(check["holding"], 1, 0, 0, "")
+    return engine.View(date, time, data.sessions[date], base, date in data.defects, today, past, past_days, holding, False)
+
+
+def case_strategy_decision_times() -> None:
+    table = sessions.exceptions()
+    for date, expected in _prd04()["decision_times"].items():
+        times = strategies.decision_times(sessions.session(date, table))
+        assert {"count": len(times), "first": times[0], "last": times[-1]} == expected, (date, times)
+
+
+def case_strategy_checks() -> None:
+    fixture = _prd04()
+    data, violations = _load(fixture["market"])
+    assert data, market_data.describe(violations)
+    for check in fixture["checks"]:
+        order = strategies.NoiseBreakout()(_strategy_view(data, check))
+        assert (order and list(order)) == check["expected"], (check["name"], order)
+
+
+def case_strategy_run() -> None:
+    run = _prd04()["run"]
+    data, violations = _load(run["market"])
+    assert data, market_data.describe(violations)
+    records = engine.run(data, strategies.NoiseBreakout())
+    assert [list(fill) for fill in records.fills] == run["expected_fills"], records.fills
+
+
+def case_strategy_lookahead() -> None:
+    run = _prd04()["run"]
+    data, _ = _load(run["market"])
+    before = engine.run(data, strategies.NoiseBreakout()).fills
+    after = engine.run(_shift_after(data, run["cut"]), strategies.NoiseBreakout()).fills
+    assert [fill for fill in before if fill.time <= run["cut"]] == [fill for fill in after if fill.time <= run["cut"]]
+    assert before != after, "바꾼 미래 봉이 결과에 닿지 않아 확인이 되지 않는다"
 
 
 CASES = {
@@ -449,6 +509,16 @@ CASES = {
             " 다음 날·다음 주 해제, 누적 한도 뒤 현금, 한도 청산의 종가 동시호가 체결",
             case_engine_limits,
         ),
+    ],
+    "04": [
+        ("판단 시각: 정상일·수능일 12번, 연초 첫 거래일 10번", case_strategy_decision_times),
+        (
+            "판단: 직전 14거래일만 쓴 경계, 봉이 없는 m·VWAP 거래량 0 생략, 늦은 시가, 갭 보정(분배락일 포함),"
+            " 방향 전환 우선, 손절, 결함일 주문 없음",
+            case_strategy_checks,
+        ),
+        ("엔진과 함께: 시뮬레이션 시작일(15번째 거래일)부터 주문, 손절 뒤 재진입, 마감 청산", case_strategy_run),
+        ("미래 봉을 바꿔도 그 전에 낸 주문이 같다", case_strategy_lookahead),
     ],
 }
 
