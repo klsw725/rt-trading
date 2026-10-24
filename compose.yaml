@@ -1,0 +1,16 @@
+services:
+  v3:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:8080:8080
+    volumes:
+      - ./data:/app/data
+      - type: bind
+        source: ./.env
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
+      - ~/.trading-oracle/auth:/root/.trading-oracle/auth

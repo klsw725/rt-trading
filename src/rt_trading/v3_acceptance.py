@@ -9,6 +9,7 @@ import io
 import json
 import sqlite3
 import tempfile
+import threading
 from collections.abc import Iterator
 from contextlib import closing
 from datetime import date as Date
@@ -17,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from rt_trading import codex, engine, fixtures, market_data, report, sessions, store, v3_daily, v3_head, v3_paper, v3_report
+from rt_trading import codex, engine, fixtures, market_data, report, sessions, store, v3_daily, v3_head, v3_paper, v3_report, v3_serve
 from rt_trading.toss import KST
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -378,6 +379,9 @@ def _scenario(fixture: dict) -> tuple[list[dict], list[dict], list[list]]:
         holidays_path.write_text("date,reason\n" + "".join(f"{day},{reason}\n" for day, reason in fixture["holidays"]), encoding="utf-8")
         _token_file(tmp / "token", head["token"])
         history = _weekdays(fixture["history"]["from"], fixture["history"]["to"])
+        if "initial_source" in fixture:
+            spec = {"source": fixture["initial_source"]}
+            fixtures.build({"fetched_at": f"{fixture['runs'][0]['at']}+09:00", "volume": 1000, "days": _source_days(fixture, history, spec)}, paths.source)
         outcomes, reports = [], []
         for run in fixture["runs"]:
             if "report_at" in run:
@@ -391,10 +395,13 @@ def _scenario(fixture: dict) -> tuple[list[dict], list[dict], list[list]]:
                 continue
             clock = _Clock(*run["at"].split("T"))
             fake = _Codex(head, clock, [["ok", 5, fixture["replies"][run["reply"]]]] if "reply" in run else [])
-            fetched: list[bool] = []
+            fetched: list[float] = []
 
-            def fetch(run: dict = run, fetched: list[bool] = fetched) -> int:
-                fetched.append(True)
+            def fetch(seconds: float, run: dict = run, fetched: list[float] = fetched, clock: _Clock = clock) -> int:
+                fetched.append(seconds)
+                if run.get("fetch_timeout"):
+                    clock.now += timedelta(seconds=seconds)
+                    return 1
                 if run.get("fetch_fails"):
                     return 1
                 fixtures.build({"fetched_at": f"{run['at']}+09:00", "volume": 1000, "days": _source_days(fixture, history, run)}, paths.source)
@@ -410,6 +417,7 @@ def _scenario(fixture: dict) -> tuple[list[dict], list[dict], list[list]]:
                     "exit": code,
                     "output": output.getvalue(),
                     "fetched": bool(fetched),
+                    "fetch_budget": fetched[0] if fetched else None,
                     "codex_calls": len(fake.requests),
                     "settled": v3_daily.settled_days(paths.paper),
                     "settled_through": [content["settled_through"] for content in inputs],
@@ -427,18 +435,24 @@ def _daily_scenario() -> tuple[list[dict], list[list]]:
     return outcomes, decisions
 
 
+def _check_outcome(run: dict, outcome: dict) -> None:
+    expected = run["expected"]
+    for key in ("exit", "fetched", "codex_calls", "settled"):
+        assert outcome[key] == expected[key], (run["name"], key, outcome[key], outcome["output"])
+    for text in expected["output"]:
+        assert text in outcome["output"], (run["name"], text, outcome["output"])
+    if "settled_through" in expected:
+        assert outcome["settled_through"] == [expected["settled_through"]], (run["name"], outcome["settled_through"])
+    if "fetch_budget" in expected:
+        assert outcome["fetch_budget"] == expected["fetch_budget"], (run["name"], outcome["fetch_budget"])
+    if expected.get("unchanged"):
+        assert outcome["unchanged"], run["name"]
+
+
 def _check_runs(*indexes: int) -> None:
     runs, (outcomes, _) = _prd03()["runs"], _daily_scenario()
     for index in indexes:
-        run, outcome, expected = runs[index], outcomes[index], runs[index]["expected"]
-        for key in ("exit", "fetched", "codex_calls", "settled"):
-            assert outcome[key] == expected[key], (run["name"], key, outcome[key], outcome["output"])
-        for text in expected["output"]:
-            assert text in outcome["output"], (run["name"], text, outcome["output"])
-        if "settled_through" in expected:
-            assert outcome["settled_through"] == [expected["settled_through"]], (run["name"], outcome["settled_through"])
-        if expected.get("unchanged"):
-            assert outcome["unchanged"], run["name"]
+        _check_outcome(runs[index], outcomes[index])
 
 
 def case_daily_holiday() -> None:
@@ -452,6 +466,10 @@ def case_daily_settle_order() -> None:
 
 def case_daily_decide_on_failure() -> None:
     _check_runs(3, 5)
+    fixture = _prd03()
+    outcomes, _, _ = _scenario(fixture | {"runs": fixture["cutoff_runs"], "initial_source": []})
+    for run, outcome in zip(fixture["cutoff_runs"], outcomes, strict=True):
+        _check_outcome(run, outcome)
 
 
 def case_daily_twice() -> None:
@@ -526,6 +544,79 @@ def case_report_repeatable() -> None:
     assert reports[1]["files"] == reports[2]["files"], "같은 저장 상태의 두 보고서가 다르다"
 
 
+# PRD 05 실행 환경과 현황 웹페이지
+
+
+def _prd05() -> dict:
+    return json.loads((FIXTURES / "prd05-serve.json").read_text(encoding="utf-8"))
+
+
+def case_serve_schedule() -> None:
+    fixture = _prd05()
+    for item in fixture["schedule"]:
+        now = datetime.fromisoformat(item["now"]).replace(tzinfo=KST)
+        assert v3_serve.due(now) == item["due"], (item["now"], v3_serve.due(now))
+        assert v3_serve.next_run(now) == datetime.fromisoformat(item["next"]).replace(tzinfo=KST), (item["now"], v3_serve.next_run(now))
+    with _temp_dir() as tmp:
+        log_path, status, done, executed = tmp / "v3" / "daily.log", {"started_at": "", "running": None, "last": None}, None, []
+
+        def execute(command: str, file: io.TextIOBase) -> int:
+            executed.append(command)
+            file.write(f"{command} 출력\n")
+            return fixture["tick_exits"][command]
+
+        for item in fixture["ticks"]:
+            now, before = datetime.fromisoformat(item["now"]).replace(tzinfo=KST), len(executed)
+            done = v3_serve.tick(done, status, log_path, lambda now=now: now, execute)
+            assert executed[before:] == item["runs"], (item["now"], executed[before:])
+        assert log_path.read_text(encoding="utf-8") == fixture["tick_log"], log_path.read_text(encoding="utf-8")
+        assert status["last"] == fixture["tick_last"] and status["running"] is None, status
+
+
+def case_serve_page() -> None:
+    fixture = _prd05()["page"]
+    with _temp_dir() as tmp:
+        paths = v3_daily.Paths(tmp / "market.sqlite3", tmp / "v3" / "market.sqlite3", tmp / "v3" / "paper.sqlite3", tmp / "v3" / "head")
+        period_path, holidays_path, report_dir, log_path = tmp / "v3_period.json", tmp / "krx_holidays.csv", tmp / "reports", tmp / "v3" / "daily.log"
+        period_path.write_text(json.dumps({"start": fixture["start"]}), encoding="utf-8")
+        holidays_path.write_text("date,reason\n" + "".join(f"{day},{reason}\n" for day, reason in fixture["holidays"]), encoding="utf-8")
+        paths.paper.parent.mkdir(parents=True)
+        for row in fixture["decisions"]:
+            v3_head.insert(paths.paper, dict.fromkeys(v3_head.COLUMNS, "") | {"attempts": 0} | row)
+        with closing(sqlite3.connect(paths.paper)) as db, db:
+            db.execute(f"CREATE TABLE settled_days ({v3_daily.SETTLED})")
+            db.executemany("INSERT INTO settled_days VALUES (?, ?)", [(day, "") for day in fixture["settled"]])
+        for name, content in fixture["reports"].items():
+            (report_dir / name).mkdir(parents=True)
+            (report_dir / name / "report.json").write_text(json.dumps(content, ensure_ascii=False), encoding="utf-8")
+        log_path.write_text("".join(f"줄 {number:02d}\n" for number in range(1, fixture["log_lines"] + 1)), encoding="utf-8")
+        now = datetime.fromisoformat(fixture["now"]).replace(tzinfo=KST)
+        httpd = v3_serve.server(
+            "127.0.0.1", 0, lambda: v3_serve.page(paths, period_path, holidays_path, report_dir, log_path, fixture["status"], now)
+        )
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            with httpx.Client(trust_env=False) as http:
+                response = http.get(f"{base}/")
+                assert response.status_code == 200 and response.headers["content-type"].startswith("text/html"), response
+                for text in fixture["present"]:
+                    assert text in response.text, (text, response.text)
+                for text in fixture["absent"]:
+                    assert text not in response.text, (text, response.text)
+                assert http.get(f"{base}/other").status_code == 404
+                assert http.post(f"{base}/").status_code == 501
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+        first = tmp / "first" / "paper.sqlite3"
+        first.parent.mkdir()
+        v3_head.insert(first, dict.fromkeys(v3_head.COLUMNS, "") | {"attempts": 0} | fixture["decisions"][0])
+        before = first.read_bytes()
+        text = v3_serve.page(paths._replace(paper=first), period_path, holidays_path, report_dir, log_path, fixture["status"], now)
+        assert fixture["first_day"] in text and first.read_bytes() == before, text
+
+
 CASES = {
     "01": [
         ("헤드 입력: 손 계산과 같고 판단일 뒤 일봉을 바꿔도 같음, 요청 본문은 지시문과 입력뿐, 인증 정보는 어디에도 없음", case_head_input),
@@ -546,7 +637,11 @@ CASES = {
     "03": [
         ("휴장일에는 시세 받기·Codex 호출이 없고 파일이 그대로이며 exit 0", case_daily_holiday),
         ("정산은 오래된 날부터 하고 검증에 실패한 날에서 멈추며, 판단이 없는 거래일은 missing·cash로 정산, 기간 끝까지 정산하면 기간 종료", case_daily_settle_order),
-        ("검증 실패나 시세 받기 실패에도 그날 판단을 하고, 입력의 settled_through는 정산을 마친 마지막 날", case_daily_decide_on_failure),
+        (
+            "검증 실패나 시세 받기 실패에도 그날 판단을 하고, 입력의 settled_through는 정산을 마친 마지막 날,"
+            " 시세 받기는 판단 마감 15분 전까지(07:30 시작이면 3,900초)이고 그 뒤 시작하면 건너뛰고 판단",
+            case_daily_decide_on_failure,
+        ),
         ("같은 날 두 번 실행하면 두 번째에는 Codex 호출이 없고 판단·정산이 더 생기지 않음", case_daily_twice),
         ("원본 거래일과 휴장일 표의 달력이 다르면 V3_CALENDAR_MISMATCH로 정산하지 않음", case_daily_calendar),
     ],
@@ -554,6 +649,18 @@ CASES = {
         ("판정 경계: 판단 실패 한 번이면 불통과, 최대 낙폭 정확히 20%면 불통과, 5거래일을 다 정산하기 전에는 판정 없음(null)", case_report_verdict),
         ("report.json·decisions.csv·trades CSV의 형식과 값(ok·실패 판단, 부하 교체, 기간 안의 결함일이 있는 사례)", case_report_files),
         ("같은 저장 상태로 두 번 만들면 실행 시각을 뺀 보고서 내용이 같다", case_report_repeatable),
+    ],
+    "05": [
+        (
+            "실행 차례: 평일 07:30·08:20 경계와 09:50 마감, 주말 없음, 다음 실행 예정 시각(금요일 뒤 월요일 07:30),"
+            " 차례마다 v3-daily 다음 v3-report를 한 번씩(앞이 실패해도), 실행 기록과 종료 코드",
+            case_serve_schedule,
+        ),
+        (
+            "현황 웹페이지: GET /에 자동 실행 상태·정산 진행·판단·최신 보고서의 계좌와 판정·실행 기록 마지막 40줄,"
+            " 옛 보고서·40줄 앞 기록은 없음, 이유 속 HTML은 글자로, 다른 경로 404·POST 501, 첫날 파일도 바꾸지 않음",
+            case_serve_page,
+        ),
     ],
 }
 

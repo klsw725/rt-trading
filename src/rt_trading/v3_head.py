@@ -118,6 +118,12 @@ def parse(text: str) -> dict:
     return value
 
 
+def decision_deadline(day: str) -> datetime:
+    """판단일 day의 판단 마감. 그날 개장 10분 전이다."""
+    opening = datetime.fromisoformat(f"{day}T{sessions.session(day, sessions.exceptions()).open}").replace(tzinfo=KST)
+    return opening - DEADLINE_BEFORE_OPEN
+
+
 def decide(
     db_path: Path,
     head_dir: Path,
@@ -135,8 +141,7 @@ def decide(
     for row in read(db_path):
         if row["date"] == day:
             return row
-    deadline = datetime.fromisoformat(f"{day}T{sessions.session(day, sessions.exceptions()).open}").replace(tzinfo=KST)
-    deadline -= DEADLINE_BEFORE_OPEN
+    deadline = decision_deadline(day)
     started = clock()
     if started >= deadline:
         return None

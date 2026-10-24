@@ -84,5 +84,28 @@
     ["2026-04-09", "ok", "trend_200"],
     ["2026-04-10", "ok", "cash"],
     ["2026-04-13", "ok", "hold_inverse"]
+  ],
+  "cutoff_runs": [
+    {
+      "name": "시세 받기가 마감 15분 전(08:35)까지 끝나지 않아도 판단",
+      "at": "2026-04-06T07:30:00",
+      "fetch_timeout": true,
+      "reply": "hold_kodex200",
+      "expected": {
+        "fetched": true, "fetch_budget": 3900, "codex_calls": 1, "settled": [], "exit": 1,
+        "output": ["V3_FETCH_FAILED", "판단: 2026-04-06 ok hold_kodex200"], "settled_through": null
+      }
+    },
+    {
+      "name": "마감 15분 전이 지나 시작하면 시세 받기를 건너뛰고 판단",
+      "at": "2026-04-07T08:40:00",
+      "source": ["2026-04-06"],
+      "reply": "cash",
+      "expected": {
+        "fetched": false, "codex_calls": 1, "settled": [], "exit": 1,
+        "output": ["V3_FETCH_SKIPPED", "V3_DATA_NOT_READY 2026-04-06", "판단: 2026-04-07 ok cash", "실패: V3_FETCH_FAILED, V3_SETTLEMENT_STOPPED"],
+        "settled_through": null
+      }
+    }
   ]
 }

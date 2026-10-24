@@ -19,6 +19,7 @@ from rt_trading import engine, market_data, store, v3_head, v3_paper
 PERIOD = Path(__file__).with_name("v3_period.json")
 HOLIDAYS = Path(__file__).with_name("krx_holidays.csv")
 PERIOD_DAYS = 5
+FETCH_RESERVE = timedelta(minutes=15)  # 시세 받기는 판단 마감 15분 전까지만 한다(SPEC 5.1)
 KODEX200 = "069500"
 SETTLED = "date TEXT NOT NULL, settled_at TEXT NOT NULL, PRIMARY KEY (date)"
 
@@ -195,13 +196,13 @@ def run(
     paths: Paths,
     period_path: Path,
     holidays_path: Path,
-    fetch: Callable[[], int],
+    fetch: Callable[[float], int],
     http: httpx.Client,
     credentials: Callable[[], tuple[str, str]],
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
 ) -> int:
-    """SPEC 5.1의 매일 실행. 시세 받기·정산·판단 중 하나라도 실패하면 1이다."""
+    """SPEC 5.1의 매일 실행. 시세 받기·정산·판단 중 하나라도 실패하면 1이다. fetch는 시세 받기에 쓸 수 있는 초를 받는다."""
     try:
         period = load_period(period_path, holidays_path)
     except DailyError as error:
@@ -213,7 +214,11 @@ def run(
         print("휴장일")
         return 0
     failures = []
-    if fetch() != 0:
+    left = (v3_head.decision_deadline(today) - FETCH_RESERVE - now).total_seconds()
+    if left <= 0:
+        print("V3_FETCH_SKIPPED: 판단 마감 15분 전이 지나 시세를 받지 않았다")
+        failures.append("V3_FETCH_FAILED")
+    elif fetch(left) != 0:
         failures.append("V3_FETCH_FAILED")
     before = settled_days(paths.paper)
     problems = settle(paths, period, today, now)

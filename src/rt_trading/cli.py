@@ -1,6 +1,7 @@
 """rt-trading 명령."""
 
 import argparse
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from rt_trading import (
     v3_acceptance,
     v3_daily,
     v3_report,
+    v3_serve,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +55,8 @@ def main() -> None:
     commands.add_parser("v3-report", help="v3 모의 운용 보고서와, 기간이 끝났으면 판정을 만든다")
     v3_checks = commands.add_parser("v3-acceptance", help="v3 acceptance를 네트워크 없이 실행한다")
     v3_checks.add_argument("--prd", choices=sorted(v3_acceptance.CASES))
+    serve = commands.add_parser("v3-serve", help="평일 07:30·08:20 자동 실행과 보기 전용 현황 웹페이지(Docker 컨테이너에서 쓴다)")
+    serve.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -70,6 +74,8 @@ def main() -> None:
         sys.exit(v3_report.run(V3_PATHS, v3_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, lambda: datetime.now(toss.KST)))
     if args.command == "v3-acceptance":
         sys.exit(v3_acceptance.run(args.prd))
+    if args.command == "v3-serve":
+        sys.exit(v3_serve.run(V3_PATHS, v3_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, V3_DIR / "daily.log", args.host, v3_serve.PORT))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
 
 
@@ -79,18 +85,22 @@ def fetch() -> int:
 
 
 def run_v3_daily() -> int:
-    """v3 매일 실행. 시세는 v1 fetch와 같은 방법으로 받고, Codex 토큰은 trading-oracle과 함께 쓴다."""
+    """v3 매일 실행. 시세는 v1 fetch 명령을 따로 실행해 받고, Codex 토큰은 trading-oracle과 함께 쓴다."""
     clock = lambda: datetime.now(toss.KST)
-    with httpx.Client(base_url=toss.BASE_URL, timeout=30) as toss_http, httpx.Client() as codex_http:
 
-        def fetch_market() -> int:
-            try:
-                credentials = toss.read_credentials(ROOT)
-            except KeyError as error:
-                print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
-                return 1
-            return run_fetch(toss_http, credentials, DB_PATH, clock)
+    def fetch_market(seconds: float) -> int:
+        try:
+            toss.read_credentials(ROOT)
+        except KeyError as error:
+            print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
+            return 1
+        try:
+            return subprocess.run(["rt-trading", "fetch"], timeout=seconds).returncode
+        except subprocess.TimeoutExpired:
+            print("V3_FETCH_TIMEOUT: 판단 마감 15분 전까지 시세를 다 받지 못해 멈췄다")
+            return 1
 
+    with httpx.Client() as codex_http:
         return v3_daily.run(
             V3_PATHS,
             v3_daily.PERIOD,
