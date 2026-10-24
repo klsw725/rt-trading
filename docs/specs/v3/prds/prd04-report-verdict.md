@@ -12,18 +12,16 @@
 ## 문제
 
 1주 모의 운용의 진행과 결과를 보고서로 보고, 기간이 끝나면 SPEC 6절로 판정해야 한다.
-또 `v3-daily`가 평일 아침마다 빠짐없이 돌아야 판단 실패 0번 기준을 지킬 수 있다.
 
 ## 목표
 
 1. `v3-report`로 보고서와 판정을 만든다(SPEC 6·7절).
 2. `v3-acceptance`가 PRD 01~04를 모두 실행하게 완성한다.
-3. `v3-daily` 자동 실행 등록 방법을 정한다(SPEC 8절).
-4. 실데이터로 첫 거래일의 판단, 정산, 보고서를 만든다(SPEC 0절).
 
 ## 범위 밖
 
 - 판단, 계좌 실행, 정산 자체(PRD 01~03)
+- 자동 실행, 현황 웹페이지, 실데이터 첫날(PRD 05)
 - 실전 매매
 
 ## 구현 표면
@@ -33,7 +31,6 @@
 | `src/rt_trading/v3_report.py` | 계좌 지표, 판정, 보고서 파일, 터미널 요약 |
 | `src/rt_trading/cli.py` | `v3-report` |
 | `src/rt_trading/v3_acceptance.py` | PRD 04 사례와 전체 실행 |
-| `launchd/com.rt-trading.v3-daily.plist` | 자동 실행 예시 |
 | `docs/specs/v3/fixtures/prd04-report.json` | 정산한 상태를 만드는 실행 순서와 손으로 계산한 보고서 |
 
 ## 보고서
@@ -75,12 +72,6 @@
 - 판단 상태별 수와, 정산 진행(`정산 n/5`) 또는 판정(`통과`·`불통과`)을 보여 준다.
 - 끝에 보고서 디렉터리를 출력한다.
 
-## 자동 실행 등록
-
-- `launchd/com.rt-trading.v3-daily.plist`는 평일(월~금) 07:30과 08:20에 저장소 루트에서 `uv run rt-trading v3-daily`를 실행하고, 실행 시각 한 줄과 표준 출력·표준 오류를 `data/v3/daily.log`에 이어 쓰는 예시다. 실행 중에는 `caffeinate -i`로 컴퓨터가 잠들지 않게 한다. 두 번째 실행은 첫 실행이 중간에 실패했을 때를 위한 것이다. 다시 실행해도 결과가 같다(PRD 03).
-- 등록은 예시의 저장소 경로와 `uv` 경로를 이 컴퓨터에 맞게 바꿔 `~/Library/LaunchAgents/`에 복사하고 `launchctl bootstrap gui/$(id -u) <파일>`로 한다. 해제는 `launchctl bootout`이다.
-- 잠자기 중에는 실행되지 않으므로 `sudo pmset repeat wakeorpoweron MTWRF 07:25:00`으로 깨운다. 노트북 덮개를 닫아 두면 깨지 않을 수 있다.
-
 ## 가상 fixture
 
 - PRD 03의 fixture 방법으로 `v3-daily`를 여러 번 실행해 정산한 상태를 만든 뒤, `v3-report` 흐름(파일 위치, 보고서 디렉터리, 실행 시각을 주는 함수)으로 보고서를 만든다.
@@ -97,13 +88,7 @@ SPEC 9절의 "판정과 보고서" 항목을 맡는다.
 - `report.json`, `decisions.csv`, `trades-{계좌}.csv`의 형식과 값이 SPEC 7절과 이 PRD와 같다.
 - 같은 저장 상태로 두 번 만들면 실행 시각을 뺀 보고서 내용이 같다.
 
-## 완료 조건 (v3 완료)
+## 완료 조건
 
-- `uv run rt-trading v3-acceptance`가 exit 0이다.
+- `uv run rt-trading v3-acceptance --prd 04`가 exit 0이다.
 - `cli.py`를 바꾸므로 `uv run rt-trading acceptance`, `uv run rt-trading v0-acceptance`, `uv run rt-trading v2-acceptance`로 기존 명령이 그대로인지 확인한다.
-- SPEC 10절을 확인하고 `v3_period.json`과 `krx_holidays.csv`를 채운 뒤, 실데이터로 다음을 한다.
-  1. 기간 첫날 아침 `v3-daily`로 첫 판단을 기록한다.
-  2. 다음 거래일 아침 `v3-daily`로 첫날을 정산한다.
-  3. `v3-report`로 보고서를 만든다.
-- 자동 실행을 등록한다.
-- SPEC과 모든 PRD의 상태를 "구현 완료"로 바꾼다. 모의 운용 기간이 다 지나는 것과 판정 결과는 완료 조건이 아니다.
