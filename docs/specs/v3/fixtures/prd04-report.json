@@ -1,0 +1,80 @@
+{
+  "start": "2024-11-11",
+  "holidays": [],
+  "history": {"from": "2024-01-02", "to": "2024-11-08", "prices": {"069500": 10000, "114800": 5000}},
+  "omit_after": {"2024-11-14": "15:30"},
+  "replies": {
+    "first": "{\"subordinate\": \"hold_kodex200\", \"reason\": \"오른다\", \"notes\": \"첫날\"}",
+    "again": "{\"subordinate\": \"hold_kodex200\", \"reason\": \"다시 오른다\", \"notes\": \"셋째 날\"}",
+    "down": "{\"subordinate\": \"hold_inverse\", \"reason\": \"내린다\", \"notes\": \"넷째 날\"}"
+  },
+  "runs": [
+    {"at": "2024-11-11T07:30:00", "source": [], "reply": "first"},
+    {"at": "2024-11-12T07:30:00", "source": ["2024-11-11"], "no_token": true},
+    {"at": "2024-11-13T07:30:00", "source": ["2024-11-11", "2024-11-12"], "reply": "again"},
+    {"report_at": "2024-11-13T08:00:00"},
+    {"at": "2024-11-14T07:30:00", "source": ["2024-11-11", "2024-11-12", "2024-11-13"], "reply": "down"},
+    {"at": "2024-11-18T07:30:00", "source": ["2024-11-11", "2024-11-12", "2024-11-13", "2024-11-14", "2024-11-15"]},
+    {"report_at": "2024-11-18T08:00:00"},
+    {"report_at": "2024-11-18T08:05:00"}
+  ],
+  "mid": {
+    "run": {"settled_days": 2, "settled_through": "2024-11-12", "defect_days": []},
+    "decisions": {"ok": 1, "late": 0, "invalid": 0, "failed": 1, "missing": 0},
+    "head_final_equity": 499816,
+    "verdict": null
+  },
+  "final": {
+    "report": {
+      "run": {
+        "start": "2024-11-11",
+        "end": "2024-11-15",
+        "trading_days": 5,
+        "settled_days": 5,
+        "settled_through": "2024-11-15",
+        "model": "gpt-6-sol",
+        "initial_capital": 500000,
+        "commission_rate": 0.000188,
+        "loss_limits": {"daily": -0.02, "weekly": -0.05, "cumulative": -0.2},
+        "defect_days": ["2024-11-14"]
+      },
+      "decisions": {"ok": 3, "late": 0, "invalid": 0, "failed": 1, "missing": 1},
+      "accounts": [
+        {"id": "head", "final_equity": 499632, "total_return": -0.000736, "max_drawdown": 0.000736, "trade_count": 2, "win_rate": 0.0, "avg_trade_pnl": -184.0, "commission_total": 368, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "rule_head", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "cash", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "hold_kodex200", "final_equity": 499816, "total_return": -0.000368, "max_drawdown": 0.000368, "trade_count": 1, "win_rate": 0.0, "avg_trade_pnl": -184.0, "commission_total": 184, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "hold_inverse", "final_equity": 499814, "total_return": -0.000372, "max_drawdown": 0.000372, "trade_count": 1, "win_rate": 0.0, "avg_trade_pnl": -186.0, "commission_total": 186, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "noise_breakout", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "turn_of_month", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "trend_200", "final_equity": 499814, "total_return": -0.000372, "max_drawdown": 0.000372, "trade_count": 1, "win_rate": 0.0, "avg_trade_pnl": -186.0, "commission_total": 186, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "last_half_hour", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "overnight_trend", "final_equity": 499442, "total_return": -0.001116, "max_drawdown": 0.001116, "trade_count": 3, "win_rate": 0.0, "avg_trade_pnl": -186.0, "commission_total": 558, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0}
+      ],
+      "verdict": {"criteria": {"no_decision_failures": false, "drawdown_below_limit": true}, "passed": false}
+    },
+    "decisions_csv": [
+      ["2024-11-11", "hold_kodex200", "오른다", "ok", "gpt-6-sol", "gpt-6-sol-2026-09-30", -0.000184],
+      ["2024-11-12", "cash", "", "failed", "gpt-6-sol", "", -0.0001840338622306481],
+      ["2024-11-13", "hold_kodex200", "다시 오른다", "ok", "gpt-6-sol", "gpt-6-sol-2026-09-30", -0.0001840677369271404],
+      ["2024-11-14", "hold_inverse", "내린다", "ok", "gpt-6-sol", "gpt-6-sol-2026-09-30", 0.0],
+      ["2024-11-15", "cash", "", "missing", "", "", -0.0001841016240965443]
+    ],
+    "trades_head": [
+      ["2024-11-11T09:01:00+09:00", "069500", "buy", "49", "10000", "92", "0", "signal"],
+      ["2024-11-12T09:01:00+09:00", "069500", "sell", "49", "10000", "92", "0", "switch_head"],
+      ["2024-11-13T09:01:00+09:00", "069500", "buy", "49", "10000", "92", "0", "signal"],
+      ["2024-11-15T09:01:00+09:00", "069500", "sell", "49", "10000", "92", "0", "switch_head"]
+    ],
+    "files": [
+      "decisions.csv", "report.json", "trades-cash.csv", "trades-head.csv", "trades-hold_inverse.csv", "trades-hold_kodex200.csv",
+      "trades-last_half_hour.csv", "trades-noise_breakout.csv", "trades-overnight_trend.csv", "trades-rule_head.csv",
+      "trades-trend_200.csv", "trades-turn_of_month.csv"
+    ]
+  },
+  "verdict_cases": [
+    {"name": "최대 낙폭 정확히 20%", "equity": 400000, "statuses": ["ok", "ok", "ok", "ok", "ok"], "expected": {"criteria": {"no_decision_failures": true, "drawdown_below_limit": false}, "passed": false}},
+    {"name": "최대 낙폭 20% 미만", "equity": 400001, "statuses": ["ok", "ok", "ok", "ok", "ok"], "expected": {"criteria": {"no_decision_failures": true, "drawdown_below_limit": true}, "passed": true}},
+    {"name": "판단 실패 한 번", "equity": 500000, "statuses": ["ok", "ok", "late", "ok", "ok"], "expected": {"criteria": {"no_decision_failures": false, "drawdown_below_limit": true}, "passed": false}}
+  ]
+}

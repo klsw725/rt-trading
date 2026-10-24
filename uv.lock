@@ -71,15 +71,41 @@ wheels = [
 ]
 
 [[package]]
+name = "oauth-cli-kit"
+version = "0.1.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "platformdirs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7d/65/db8768844cff218ae2bb19305ec1abe95e414c9953af205fe1b75a5e2300/oauth_cli_kit-0.1.6.tar.gz", hash = "sha256:7252f57e1a2f9dba7a94894c11b979f83884b3c88af3b4fe0206370a2b120499", size = 8529, upload-time = "2026-06-30T06:18:35.295Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ff/9f/53555ec2543e6ba5f6eeff4331cca43842a2c48983c793c97560500b6764/oauth_cli_kit-0.1.6-py3-none-any.whl", hash = "sha256:d4a73beae7333ae642a9e5766ab0a04de53279667fefdf064c23db77a3494e7f", size = 11490, upload-time = "2026-06-30T06:18:34.467Z" },
+]
+
+[[package]]
+name = "platformdirs"
+version = "4.13.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/e6/d0abbb256b44e6a05748c6942511ff67db8dbb068de0c35b24bf1b395b09/platformdirs-4.13.5.tar.gz", hash = "sha256:05831adf87d392760f4b5c3a0a95579ab5a10b18b9b9bd43680dcb47544788a0", size = 62362, upload-time = "2026-10-19T01:02:11.778Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/8a/1d8cb3842909dc193a73835adedf412e32e18f8ffd59f43983949622fe6f/platformdirs-4.13.5-py3-none-any.whl", hash = "sha256:53d3ec4280b815c1e0b02edad7f9ee8fda1ba9c0865dd9c2e6e63849ce82fc1e", size = 32779, upload-time = "2026-10-19T01:02:10.17Z" },
+]
+
+[[package]]
 name = "rt-trading"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "oauth-cli-kit" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "httpx", specifier = ">=0.28.1" }]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "oauth-cli-kit", specifier = ">=0.1.3,<1.0.0" },
+]
 
 [[package]]
 name = "typing-extensions"

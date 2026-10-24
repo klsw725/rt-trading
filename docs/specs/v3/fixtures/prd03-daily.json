@@ -1,0 +1,88 @@
+{
+  "start": "2026-04-06",
+  "holidays": [["2026-04-08", "시험용 휴장일"]],
+  "history": {"from": "2025-06-02", "to": "2026-04-03", "prices": {"069500": 10000, "114800": 5000}},
+  "broken_bars": {"069500": {"10:00": null}},
+  "replies": {
+    "hold_kodex200": "{\"subordinate\": \"hold_kodex200\", \"reason\": \"오른다\", \"notes\": \"첫날\"}",
+    "trend_200": "{\"subordinate\": \"trend_200\", \"reason\": \"추세\", \"notes\": \"둘째\"}",
+    "cash": "{\"subordinate\": \"cash\", \"reason\": \"쉰다\", \"notes\": \"셋째\"}",
+    "hold_inverse": "{\"subordinate\": \"hold_inverse\", \"reason\": \"내린다\", \"notes\": \"넷째\"}"
+  },
+  "runs": [
+    {
+      "name": "시작일 아침 판단",
+      "at": "2026-04-06T07:30:00",
+      "source": [],
+      "reply": "hold_kodex200",
+      "expected": {"fetched": true, "codex_calls": 1, "settled": [], "exit": 0, "output": ["판단: 2026-04-06 ok hold_kodex200"], "settled_through": null}
+    },
+    {
+      "name": "같은 날 다시 실행",
+      "at": "2026-04-06T07:40:00",
+      "source": [],
+      "expected": {"fetched": true, "codex_calls": 0, "settled": [], "exit": 0, "output": ["판단: 2026-04-06 ok hold_kodex200"]}
+    },
+    {
+      "name": "휴장일",
+      "at": "2026-04-08T07:30:00",
+      "expected": {"fetched": false, "codex_calls": 0, "settled": [], "exit": 0, "output": ["휴장일"], "unchanged": true}
+    },
+    {
+      "name": "검증에 실패한 날에서 멈추고 판단은 함",
+      "at": "2026-04-09T07:30:00",
+      "source": ["2026-04-06", "2026-04-07"],
+      "broken": ["2026-04-07"],
+      "reply": "trend_200",
+      "expected": {
+        "fetched": true, "codex_calls": 1, "settled": ["2026-04-06"], "exit": 1,
+        "output": ["V1_SESSION_MISMATCH 2026-04-07", "판단: 2026-04-09 ok trend_200"], "settled_through": "2026-04-06"
+      }
+    },
+    {
+      "name": "밀린 날 정산과 판단 없는 날 missing",
+      "at": "2026-04-10T07:30:00",
+      "source": ["2026-04-06", "2026-04-07", "2026-04-09"],
+      "reply": "cash",
+      "expected": {
+        "fetched": true, "codex_calls": 1, "settled": ["2026-04-06", "2026-04-07", "2026-04-09"], "exit": 0,
+        "output": ["판단: 2026-04-10 ok cash"], "settled_through": "2026-04-09"
+      }
+    },
+    {
+      "name": "시세 받기가 실패해도 판단",
+      "at": "2026-04-13T07:30:00",
+      "fetch_fails": true,
+      "reply": "hold_inverse",
+      "expected": {
+        "fetched": true, "codex_calls": 1, "settled": ["2026-04-06", "2026-04-07", "2026-04-09"], "exit": 1,
+        "output": ["V3_DATA_NOT_READY 2026-04-10", "V3_FETCH_FAILED", "판단: 2026-04-13 ok hold_inverse"], "settled_through": "2026-04-09"
+      }
+    },
+    {
+      "name": "원본 거래일이 휴장일 표와 다르면 정산하지 않음",
+      "at": "2026-04-14T07:30:00",
+      "source": ["2026-04-06", "2026-04-07", "2026-04-08", "2026-04-09", "2026-04-10", "2026-04-13"],
+      "expected": {
+        "fetched": true, "codex_calls": 0, "settled": ["2026-04-06", "2026-04-07", "2026-04-09"], "exit": 1,
+        "output": ["V3_CALENDAR_MISMATCH", "2026-04-08"]
+      }
+    },
+    {
+      "name": "기간 마지막 날까지 정산",
+      "at": "2026-04-14T08:00:00",
+      "source": ["2026-04-06", "2026-04-07", "2026-04-09", "2026-04-10", "2026-04-13"],
+      "expected": {
+        "fetched": true, "codex_calls": 0, "settled": ["2026-04-06", "2026-04-07", "2026-04-09", "2026-04-10", "2026-04-13"], "exit": 0,
+        "output": ["기간 종료"]
+      }
+    }
+  ],
+  "decisions": [
+    ["2026-04-06", "ok", "hold_kodex200"],
+    ["2026-04-07", "missing", "cash"],
+    ["2026-04-09", "ok", "trend_200"],
+    ["2026-04-10", "ok", "cash"],
+    ["2026-04-13", "ok", "hold_inverse"]
+  ]
+}

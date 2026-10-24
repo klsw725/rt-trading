@@ -1,0 +1,176 @@
+{
+  "market": {
+    "start": "2025-03-03",
+    "end": "2026-01-02",
+    "holidays": ["2025-12-25", "2025-12-31", "2026-01-01"],
+    "base": {"069500": 10000, "114800": 5000},
+    "changes": {
+      "2025-12-29": {"069500": 11000, "114800": 4500},
+      "2025-12-30": {"069500": 10450, "114800": 4725},
+      "2026-01-02": {"069500": 10659, "114800": 4536}
+    },
+    "future": {
+      "2026-01-05": {"069500": 50000, "114800": 1000},
+      "2026-01-06": {"069500": 3000, "114800": 9000}
+    }
+  },
+  "month_days": [
+    "2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13",
+    "2026-01-14", "2026-01-15", "2026-01-16", "2026-01-19", "2026-01-20", "2026-01-21", "2026-01-22", "2026-01-23",
+    "2026-01-26", "2026-01-27", "2026-01-28", "2026-01-29", "2026-01-30"
+  ],
+  "accounts": {
+    "subordinates": {
+      "cash": {"recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null},
+      "hold_kodex200": {"recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"},
+      "hold_inverse": {"recent_returns_pct": {"1d": -4.02, "5d": -9.31, "20d": -9.31}, "holding": "114800"},
+      "noise_breakout": {"recent_returns_pct": {"1d": 0.0, "5d": -0.41, "20d": -0.41}, "holding": null},
+      "turn_of_month": {"recent_returns_pct": {"1d": 1.99, "5d": 1.98, "20d": 1.98}, "holding": "069500"},
+      "trend_200": {"recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"},
+      "last_half_hour": {"recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null},
+      "overnight_trend": {"recent_returns_pct": {"1d": 0.52, "5d": 1.1, "20d": 1.1}, "holding": null}
+    },
+    "head_account": {
+      "subordinate": "trend_200",
+      "holding": "069500",
+      "return_since_start_pct": 1.23,
+      "max_drawdown_pct": 0.5,
+      "limits": {"weekly": false, "cumulative": false}
+    },
+    "rule_head": {"return_since_start_pct": 0.8, "max_drawdown_pct": 0.3},
+    "head_returns": {"2025-12-30": 0.4, "2026-01-02": -0.2},
+    "settled_through": "2026-01-02"
+  },
+  "decisions": [
+    {
+      "date": "2025-12-29", "status": "ok", "subordinate": "hold_kodex200", "reason": "보유 시작", "notes": "노트 하나",
+      "model": "gpt-6-sol", "reported_model": "", "attempts": 1, "error": "",
+      "started_at": "2025-12-29T07:30:00+09:00", "finished_at": "2025-12-29T07:31:00+09:00"
+    },
+    {
+      "date": "2025-12-30", "status": "ok", "subordinate": "trend_200", "reason": "추세 위", "notes": "노트 둘",
+      "model": "gpt-6-sol", "reported_model": "", "attempts": 1, "error": "",
+      "started_at": "2025-12-30T07:30:00+09:00", "finished_at": "2025-12-30T07:31:00+09:00"
+    },
+    {
+      "date": "2026-01-02", "status": "failed", "subordinate": "cash", "reason": "", "notes": "",
+      "model": "gpt-6-sol", "reported_model": "", "attempts": 5, "error": "V3_CODEX_UNAVAILABLE",
+      "started_at": "2026-01-02T07:30:00+09:00", "finished_at": "2026-01-02T07:45:25+09:00"
+    }
+  ],
+  "expected_input": {
+    "decision_date": "2026-01-05",
+    "session": {"open": "09:00", "close": "15:30", "note": ""},
+    "month_position": {"from_start": 2, "from_end": 20},
+    "data_through": "2026-01-02",
+    "market": {
+      "kodex200": {
+        "daily_returns_pct": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, -5.0, 2.0],
+        "returns_pct": {"1d": 2.0, "5d": 6.59, "20d": 6.59, "60d": 6.59},
+        "vs_average_pct": {"5d": 2.28, "20d": 5.48, "60d": 6.22, "200d": 6.48},
+        "volatility_20d_pct": 40.97,
+        "drawdown_60d_pct": -3.1
+      },
+      "inverse": {
+        "daily_returns_pct": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -10.0, 5.0, -4.0]
+      }
+    },
+    "subordinates": [
+      {"id": "cash", "recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null},
+      {"id": "hold_kodex200", "recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"},
+      {"id": "hold_inverse", "recent_returns_pct": {"1d": -4.02, "5d": -9.31, "20d": -9.31}, "holding": "114800"},
+      {"id": "noise_breakout", "recent_returns_pct": {"1d": 0.0, "5d": -0.41, "20d": -0.41}, "holding": null},
+      {"id": "turn_of_month", "recent_returns_pct": {"1d": 1.99, "5d": 1.98, "20d": 1.98}, "holding": "069500"},
+      {"id": "trend_200", "recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"},
+      {"id": "last_half_hour", "recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null},
+      {"id": "overnight_trend", "recent_returns_pct": {"1d": 0.52, "5d": 1.1, "20d": 1.1}, "holding": null}
+    ],
+    "head_account": {
+      "subordinate": "trend_200",
+      "holding": "069500",
+      "return_since_start_pct": 1.23,
+      "max_drawdown_pct": 0.5,
+      "limits": {"weekly": false, "cumulative": false}
+    },
+    "recent_decisions": [
+      {"date": "2025-12-29", "subordinate": "hold_kodex200", "reason": "보유 시작", "status": "ok", "head_return_pct": null},
+      {"date": "2025-12-30", "subordinate": "trend_200", "reason": "추세 위", "status": "ok", "head_return_pct": 0.4},
+      {"date": "2026-01-02", "subordinate": "cash", "reason": "", "status": "failed", "head_return_pct": -0.2}
+    ],
+    "rule_head": {"return_since_start_pct": 0.8, "max_drawdown_pct": 0.3},
+    "settled_through": "2026-01-02",
+    "notes": "노트 둘"
+  },
+  "token": {"access": "FAKE-ACCESS-7f3a91", "refresh": "FAKE-REFRESH-91c2d4", "account_id": "FAKE-ACCOUNT-55d0e8"},
+  "reported_model": "gpt-6-sol-2026-09-30",
+  "ok_text": "{\"subordinate\": \"trend_200\", \"reason\": \"추세가 위다\", \"notes\": \"변동성이 커지면 현금으로 쉰다\"}",
+  "invalid_text": "오늘은 trend_200을 고른다",
+  "responses": [
+    {"name": "올바른 응답", "text": "{\"subordinate\": \"trend_200\", \"reason\": \"추세가 위다\", \"notes\": \"변동성이 커지면 현금으로 쉰다\"}", "valid": true},
+    {"name": "코드 블록으로 감싼 응답", "text": "```json\n{\"subordinate\": \"cash\", \"reason\": \"쉰다\", \"notes\": \"\"}\n```", "valid": true},
+    {"name": "목록 밖 id", "text": "{\"subordinate\": \"leverage_2x\", \"reason\": \"크게 건다\", \"notes\": \"\"}", "valid": false},
+    {"name": "JSON이 아닌 응답", "text": "오늘은 trend_200을 고른다", "valid": false},
+    {"name": "다른 키", "text": "{\"subordinate\": \"cash\", \"reason\": \"\", \"notes\": \"\", \"loss_limit\": \"-50%\"}", "valid": false},
+    {"name": "reason 500자, notes 2,000자", "lengths": {"reason": 500, "notes": 2000}, "valid": true},
+    {"name": "reason 501자", "lengths": {"reason": 501, "notes": 0}, "valid": false},
+    {"name": "notes 2,001자", "lengths": {"reason": 0, "notes": 2001}, "valid": false}
+  ],
+  "deadline_cases": [
+    {
+      "name": "다시 부르는 간격 1·2·4·4·4분 뒤 정상",
+      "date": "2026-01-05", "start": "08:00:00",
+      "attempts": [["http", 5], ["network", 5], ["rate", 5], ["failed_event", 5], ["invalid", 5], ["ok", 5]],
+      "expected": {"status": "ok", "subordinate": "trend_200", "attempts": 6, "error": "", "waits": [60, 120, 240, 240, 240], "finished_at": "2026-01-05T08:15:30+09:00"}
+    },
+    {
+      "name": "정상일 마감 1초 전에 마침",
+      "date": "2026-01-05", "start": "08:49:00", "attempts": [["ok", 59]],
+      "expected": {"status": "ok", "subordinate": "trend_200", "attempts": 1, "error": "", "waits": [], "finished_at": "2026-01-05T08:49:59+09:00"}
+    },
+    {
+      "name": "정상일 마감 08:50에 마침",
+      "date": "2026-01-05", "start": "08:49:00", "attempts": [["ok", 60]],
+      "expected": {"status": "late", "subordinate": "cash", "attempts": 1, "error": "", "waits": [], "finished_at": "2026-01-05T08:50:00+09:00"}
+    },
+    {
+      "name": "10시 개장일 마감 1초 전에 마침",
+      "date": "2026-01-02", "start": "09:49:00", "attempts": [["ok", 59]],
+      "expected": {"status": "ok", "subordinate": "trend_200", "attempts": 1, "error": "", "waits": [], "finished_at": "2026-01-02T09:49:59+09:00"}
+    },
+    {
+      "name": "10시 개장일 마감 09:50에 마침",
+      "date": "2026-01-02", "start": "09:49:00", "attempts": [["ok", 60]],
+      "expected": {"status": "late", "subordinate": "cash", "attempts": 1, "error": "", "waits": [], "finished_at": "2026-01-02T09:50:00+09:00"}
+    },
+    {
+      "name": "마감까지 호출 오류",
+      "date": "2026-01-05", "start": "08:40:00", "attempts": [["http", 5], ["http", 5], ["http", 5], ["http", 5], ["http", 5]],
+      "expected": {"status": "failed", "subordinate": "cash", "attempts": 4, "error": "V3_CODEX_HTTP_ERROR", "waits": [60, 120, 240], "finished_at": "2026-01-05T08:47:20+09:00"}
+    },
+    {
+      "name": "마감까지 형식 오류",
+      "date": "2026-01-05", "start": "08:40:00", "attempts": [["invalid", 5], ["invalid", 5], ["invalid", 5], ["invalid", 5], ["invalid", 5]],
+      "expected": {"status": "invalid", "subordinate": "cash", "attempts": 4, "error": "V3_HEAD_RESPONSE_INVALID", "waits": [60, 120, 240], "finished_at": "2026-01-05T08:47:20+09:00"}
+    },
+    {
+      "name": "토큰 파일이 없으면 다시 부르지 않음",
+      "date": "2026-01-05", "start": "07:30:00", "attempts": [], "no_token": true,
+      "expected": {"status": "failed", "subordinate": "cash", "attempts": 1, "error": "V3_CODEX_TOKEN_MISSING", "waits": [], "finished_at": "2026-01-05T07:30:00+09:00"}
+    },
+    {
+      "name": "마감 뒤에 시작하면 부르지도 기록하지도 않음",
+      "date": "2026-01-05", "start": "08:50:00", "attempts": [],
+      "expected": null
+    }
+  ],
+  "notes_case": {
+    "first": {"date": "2026-01-05", "start": "07:30:00", "text": "{\"subordinate\": \"hold_kodex200\", \"reason\": \"오른다\", \"notes\": \"다음엔 변동성을 본다\"}"},
+    "failed": {"date": "2026-01-06", "start": "07:30:00"},
+    "next": "2026-01-07",
+    "expected_notes": "다음엔 변동성을 본다",
+    "expected_recent": [
+      {"date": "2026-01-05", "subordinate": "hold_kodex200", "reason": "오른다", "status": "ok", "head_return_pct": null},
+      {"date": "2026-01-06", "subordinate": "cash", "reason": "", "status": "failed", "head_return_pct": null}
+    ]
+  }
+}

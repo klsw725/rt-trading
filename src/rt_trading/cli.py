@@ -2,17 +2,35 @@
 
 import argparse
 import sys
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import httpx
 
-from rt_trading import engine, market_data, report, store, strategies, toss, v0, v0_acceptance, v2_acceptance, v2_backtest
+from rt_trading import (
+    codex,
+    engine,
+    market_data,
+    report,
+    store,
+    strategies,
+    toss,
+    v0,
+    v0_acceptance,
+    v2_acceptance,
+    v2_backtest,
+    v3_acceptance,
+    v3_daily,
+    v3_report,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "market.sqlite3"
 REPORT_DIR = ROOT / "data" / "reports"
+V3_DIR = ROOT / "data" / "v3"
+V3_PATHS = v3_daily.Paths(DB_PATH, V3_DIR / "market.sqlite3", V3_DIR / "paper.sqlite3", V3_DIR / "head")
 SYMBOLS = ("069500", "114800")
 SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
 
@@ -31,6 +49,10 @@ def main() -> None:
     commands.add_parser("v2-backtest", help="저장된 두 DB로 v2 두 단계 백테스트를 한다")
     v2_checks = commands.add_parser("v2-acceptance", help="v2 acceptance를 네트워크 없이 실행한다")
     v2_checks.add_argument("--prd", choices=sorted(v2_acceptance.CASES))
+    commands.add_parser("v3-daily", help="v3 매일 실행: 시세를 받아 밀린 날을 정산하고 오늘 헤드 판단을 한다")
+    commands.add_parser("v3-report", help="v3 모의 운용 보고서와, 기간이 끝났으면 판정을 만든다")
+    v3_checks = commands.add_parser("v3-acceptance", help="v3 acceptance를 네트워크 없이 실행한다")
+    v3_checks.add_argument("--prd", choices=sorted(v3_acceptance.CASES))
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -42,12 +64,43 @@ def main() -> None:
         sys.exit(v2_backtest.run(v0.DB_PATH, DB_PATH, REPORT_DIR, lambda: datetime.now(toss.KST)))
     if args.command == "v2-acceptance":
         sys.exit(v2_acceptance.run(args.prd))
+    if args.command == "v3-daily":
+        sys.exit(run_v3_daily())
+    if args.command == "v3-report":
+        sys.exit(v3_report.run(V3_PATHS, v3_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, lambda: datetime.now(toss.KST)))
+    if args.command == "v3-acceptance":
+        sys.exit(v3_acceptance.run(args.prd))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
 
 
 def fetch() -> int:
     with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
         return run_fetch(http, toss.read_credentials(ROOT), DB_PATH, lambda: datetime.now(toss.KST))
+
+
+def run_v3_daily() -> int:
+    """v3 매일 실행. 시세는 v1 fetch와 같은 방법으로 받고, Codex 토큰은 trading-oracle과 함께 쓴다."""
+    clock = lambda: datetime.now(toss.KST)
+    with httpx.Client(base_url=toss.BASE_URL, timeout=30) as toss_http, httpx.Client() as codex_http:
+
+        def fetch_market() -> int:
+            try:
+                credentials = toss.read_credentials(ROOT)
+            except KeyError as error:
+                print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
+                return 1
+            return run_fetch(toss_http, credentials, DB_PATH, clock)
+
+        return v3_daily.run(
+            V3_PATHS,
+            v3_daily.PERIOD,
+            v3_daily.HOLIDAYS,
+            fetch_market,
+            codex_http,
+            lambda: codex.credentials(codex.TOKEN_DIR),
+            clock,
+            time.sleep,
+        )
 
 
 def run_backtest(db_path: Path, report_dir: Path, clock: Callable[[], datetime]) -> int:

@@ -69,7 +69,15 @@ class Discard(NamedTuple):
     time: str
     kind: str  # 버리거나 취소한 주문의 종류
     symbol: str | None
-    reason: str  # entry_blocked(진입 막힘), pending(대기 주문 있음), after_close(마감 지남), last_day(마지막 거래일)
+    reason: str  # entry_blocked(진입 막힘), pending(대기 주문 있음), after_close(마감 지남), last_day(마지막 거래일), switch_head(v3 부하 교체)
+
+
+class PreOpen(NamedTuple):
+    """v3 개장 전 처리(v3 PRD 02). 그날 첫 봉 전에 대기 매수를 취소하거나, 보유를 팔거나, 시가 동시호가에 살 종목을 정한다."""
+
+    cancel: bool = False
+    sell: bool = False
+    buy: str | None = None
 
 
 class Records(NamedTuple):
@@ -89,10 +97,21 @@ class _Buy(NamedTuple):
     after_sell: bool  # 전환 매수라 매도 체결을 기다린다
 
 
-def run(data: MarketData, strategy: Callable[[View], Order | None], start: int = WARMUP_DAYS, overnight: bool = False) -> Records:
+def run(
+    data: MarketData,
+    strategy: Callable[[View], Order | None],
+    start: int = WARMUP_DAYS,
+    overnight: bool = False,
+    calendar: list[str] | None = None,
+    final_day: str | None = None,
+    overnight_on: Callable[[str], bool] | None = None,
+    pre_open: Callable[[View], PreOpen | None] | None = None,
+) -> Records:
     """start 거래일부터 마지막 거래일까지 분마다 PRD 03의 순서로 처리한다.
 
     overnight이면 v2 PRD 02의 며칠 보유 방식이다. 기본값으로 부르면 v1과 같다.
+    v3 PRD 02의 선택 인자: calendar는 전략에 넘기는 달력, final_day는 마지막 거래일로 볼 날(데이터에 없으면 어느 날도 아니다),
+    overnight_on은 날짜별 며칠 보유 방식, pre_open은 날마다 첫 봉 전에 부르는 개장 전 처리다. 주지 않으면 지금과 같다.
     """
     symbols = sorted(data.bars)  # 입력 순서와 관계없이 같은 결과를 낸다
     defects = set(data.defects)
@@ -102,10 +121,12 @@ def run(data: MarketData, strategy: Callable[[View], Order | None], start: int =
     last_close = weekly_base = INITIAL_CASH
     week, cumulative_hit = None, False
     last_price = {}  # 종목 → 가장 최근 봉 종가. 거래일이 바뀌어도 이어 쓴다
+    days = calendar or data.days  # 전략에 넘기는 달력
     for index, date in enumerate(data.days):
         if index >= start:
-            final = index == len(data.days) - 1
-            settle_at_close = not overnight or final
+            final = date == final_day if final_day else index == len(data.days) - 1
+            overnight_today = overnight_on(date) if overnight_on else overnight
+            settle_at_close = not overnight_today or final
             if Date.fromisoformat(date).isocalendar()[:2] != week:
                 week, weekly_base, weekly_hit = Date.fromisoformat(date).isocalendar()[:2], last_close, False
             daily_base, daily_hit = last_close, False
@@ -122,9 +143,33 @@ def run(data: MarketData, strategy: Callable[[View], Order | None], start: int =
                 cash += amount - tax
                 holding = holding._replace(received=holding.received + amount - tax)
                 records.distributions.append((date, holding.symbol, amount, tax))
-            if overnight and final and buy:
+            if overnight_today and final and buy:
                 records.discarded.append(Discard(f"{date} {times[0]}", buy.kind, buy.symbol, "last_day"))
                 buy = None
+            if pre_open:
+                pending = bool(sell_reason or buy)
+                empty = {symbol: [] for symbol in symbols}
+                plan = pre_open(
+                    View(date, session.open, session, base, date in defects, empty, past, past_days, holding, pending, days, data.defects, adj_closes)
+                )
+                stamp = f"{date} {session.open}"
+                if plan and plan.cancel and buy:
+                    records.discarded.append(Discard(stamp, buy.kind, buy.symbol, "switch_head"))
+                    buy = None
+                if plan and plan.sell and holding:
+                    sell_reason = "switch_head"
+                if plan and plan.buy:
+                    selling = bool(plan.sell and holding)
+                    if holding and not selling:
+                        records.discarded.append(Discard(stamp, "buy", plan.buy, "pending"))
+                    elif final:
+                        records.discarded.append(Discard(stamp, "buy", plan.buy, "last_day"))
+                    elif cumulative_hit or weekly_hit:
+                        records.discarded.append(Discard(stamp, "buy", plan.buy, "entry_blocked"))
+                    elif buy:
+                        records.discarded.append(Discard(stamp, "buy", plan.buy, "pending"))
+                    else:
+                        buy = _Buy(plan.buy, "buy", "signal", after_sell=selling)
             for time in times:
                 stamp, now, auction = f"{date} {time}", {symbol: bars[symbol].get(time) for symbol in symbols}, {}
                 for symbol, bar in now.items():
@@ -195,14 +240,14 @@ def run(data: MarketData, strategy: Callable[[View], Order | None], start: int =
                 # 6. 전략
                 view = View(
                     date, time, session, base, date in defects, today, past, past_days, holding, bool(sell_reason or buy),
-                    data.days, data.defects, adj_closes,
+                    days, data.defects, adj_closes,
                 )
                 order = strategy(view)
                 if order:
                     entry = order.kind != "sell"
                     if entry and time == close_time:
                         records.discarded.append(Discard(stamp, order.kind, order.symbol, "after_close"))
-                    elif entry and overnight and final:
+                    elif entry and overnight_today and final:
                         records.discarded.append(Discard(stamp, order.kind, order.symbol, "last_day"))
                     elif entry and (cumulative_hit or weekly_hit or daily_hit):
                         records.discarded.append(Discard(stamp, order.kind, order.symbol, "entry_blocked"))
