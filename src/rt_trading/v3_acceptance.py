@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from rt_trading import codex, engine, fixtures, market_data, report, sessions, store, v3_daily, v3_head, v3_paper, v3_report, v3_serve
+from rt_trading import codex, engine, fixtures, market_data, report, sessions, store, v3_daily, v3_head, v3_paper, v3_report, v3_serve, v3_us
 from rt_trading.toss import KST
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +53,18 @@ def _daily_db(path: Path, market: dict, future: bool = False) -> None:
     with closing(sqlite3.connect(path)) as db, db:
         db.execute(f"CREATE TABLE candles_1d ({store.TABLES['candles_1d']})")
         db.executemany("INSERT INTO candles_1d VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+
+def _us_db(path: Path, market: dict, future: bool = False) -> None:
+    """us_candles_1d만 있는 미국 일봉 DB. 적지 않은 날은 기본 수정 종가다."""
+    days = [day for day in _weekdays(market["start"], market["end"]) if day not in market["holidays"]]
+    prices = {day: {**market["base"], **market["changes"].get(day, {})} for day in days}
+    if future:
+        prices |= market["future"]
+    rows = [(symbol, day, price) for day, symbols in prices.items() for symbol, price in symbols.items()]
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(f"CREATE TABLE us_candles_1d ({v3_us.TABLE})")
+        db.executemany("INSERT INTO us_candles_1d VALUES (?, ?, ?)", rows)
 
 
 def _expected_input(fixture: dict) -> dict:
@@ -156,9 +168,10 @@ def case_head_input() -> None:
     with _temp_dir() as tmp:
         decisions = _decision_rows(tmp / "given.sqlite3", fixture["decisions"])
         for future in (False, True):
-            market = tmp / f"market-{future}.sqlite3"
+            market, us = tmp / f"market-{future}.sqlite3", tmp / f"us-{future}.sqlite3"
             _daily_db(market, fixture["market"], future)
-            content = v3_head.build_input("2026-01-05", fixture["month_days"], market, fixture["accounts"], decisions)
+            _us_db(us, fixture["us_market"], future)
+            content = v3_head.build_input("2026-01-05", fixture["month_days"], market, us, fixture["accounts"], decisions)
             _same(content, expected)
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
@@ -248,7 +261,7 @@ def case_head_notes() -> None:
         assert row["status"] == "ok", row
         row, _, _ = _decide(fixture, tmp, case["failed"]["date"], case["failed"]["start"], [], {"decision_date": case["failed"]["date"]}, False)
         assert row["status"] == "failed", row
-        content = v3_head.build_input(case["next"], fixture["month_days"], market, fixture["accounts"], v3_head.read(tmp / "paper.sqlite3"))
+        content = v3_head.build_input(case["next"], fixture["month_days"], market, tmp / "us.sqlite3", fixture["accounts"], v3_head.read(tmp / "paper.sqlite3"))
         assert content["notes"] == case["expected_notes"], content["notes"]
         _same(content["recent_decisions"], case["expected_recent"])
 
@@ -373,7 +386,7 @@ def _scenario(fixture: dict) -> tuple[list[dict], list[dict], list[list]]:
     """fixture의 실행을 차례로 돌린다. (매일 실행마다의 결과, 보고서마다의 결과, 마지막 판단 기록)."""
     head = _prd01()
     with _temp_dir() as tmp:
-        paths = v3_daily.Paths(tmp / "market.sqlite3", tmp / "v3" / "market.sqlite3", tmp / "v3" / "paper.sqlite3", tmp / "v3" / "head")
+        paths = v3_daily.Paths(tmp / "market.sqlite3", tmp / "v3" / "market.sqlite3", tmp / "v3" / "paper.sqlite3", tmp / "v3" / "head", tmp / "us.sqlite3")
         period_path, holidays_path = tmp / "v3_period.json", tmp / "krx_holidays.csv"
         period_path.write_text(json.dumps({"start": fixture["start"]}), encoding="utf-8")
         holidays_path.write_text("date,reason\n" + "".join(f"{day},{reason}\n" for day, reason in fixture["holidays"]), encoding="utf-8")
@@ -576,7 +589,7 @@ def case_serve_schedule() -> None:
 def case_serve_page() -> None:
     fixture = _prd05()["page"]
     with _temp_dir() as tmp:
-        paths = v3_daily.Paths(tmp / "market.sqlite3", tmp / "v3" / "market.sqlite3", tmp / "v3" / "paper.sqlite3", tmp / "v3" / "head")
+        paths = v3_daily.Paths(tmp / "market.sqlite3", tmp / "v3" / "market.sqlite3", tmp / "v3" / "paper.sqlite3", tmp / "v3" / "head", tmp / "us.sqlite3")
         period_path, holidays_path, report_dir, log_path = tmp / "v3_period.json", tmp / "krx_holidays.csv", tmp / "reports", tmp / "v3" / "daily.log"
         period_path.write_text(json.dumps({"start": fixture["start"]}), encoding="utf-8")
         holidays_path.write_text("date,reason\n" + "".join(f"{day},{reason}\n" for day, reason in fixture["holidays"]), encoding="utf-8")
@@ -619,7 +632,11 @@ def case_serve_page() -> None:
 
 CASES = {
     "01": [
-        ("헤드 입력: 손 계산과 같고 판단일 뒤 일봉을 바꿔도 같음, 요청 본문은 지시문과 입력뿐, 인증 정보는 어디에도 없음", case_head_input),
+        (
+            "헤드 입력: 손 계산과 같고 판단일 뒤 일봉(미국 일봉 포함)을 바꿔도 같음, 미국 수익률은 미국 거래일로 셈,"
+            " 요청 본문은 지시문과 입력뿐, 인증 정보는 어디에도 없음",
+            case_head_input,
+        ),
         ("응답 검증: 코드 블록 허용, 목록 밖 id·JSON 아님·다른 키·길이 초과(500·2,000자 통과, 501·2,001자 실패)는 형식 오류", case_head_response),
         ("다시 부르기 1·2·4·4분, 마감(정상일 08:50, 10시 개장일 09:50) 전 ok·뒤 late, 마감까지 실패·형식 오류, 토큰 없음, 마감 뒤 시작", case_head_deadline),
         ("ok 판단의 노트가 다음 입력에 들어가고, 실패한 날이 끼어도 마지막 ok 노트가 들어간다", case_head_notes),

@@ -26,13 +26,14 @@ from rt_trading import (
     v3_daily,
     v3_report,
     v3_serve,
+    v3_us,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = ROOT / "data" / "market.sqlite3"
 REPORT_DIR = ROOT / "data" / "reports"
 V3_DIR = ROOT / "data" / "v3"
-V3_PATHS = v3_daily.Paths(DB_PATH, V3_DIR / "market.sqlite3", V3_DIR / "paper.sqlite3", V3_DIR / "head")
+V3_PATHS = v3_daily.Paths(DB_PATH, V3_DIR / "market.sqlite3", V3_DIR / "paper.sqlite3", V3_DIR / "head", ROOT / "data" / "us.sqlite3")
 SYMBOLS = ("069500", "114800")
 SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
 
@@ -52,6 +53,7 @@ def main() -> None:
     v2_checks = commands.add_parser("v2-acceptance", help="v2 acceptance를 네트워크 없이 실행한다")
     v2_checks.add_argument("--prd", choices=sorted(v2_acceptance.CASES))
     commands.add_parser("v3-daily", help="v3 매일 실행: 시세를 받아 밀린 날을 정산하고 오늘 헤드 판단을 한다")
+    commands.add_parser("v3-us-fetch", help="토스에서 미국 네 종목(SOXX·QQQ·SPY·MU) 일봉을 받아 data/us.sqlite3에 저장한다")
     commands.add_parser("v3-report", help="v3 모의 운용 보고서와, 기간이 끝났으면 판정을 만든다")
     v3_checks = commands.add_parser("v3-acceptance", help="v3 acceptance를 네트워크 없이 실행한다")
     v3_checks.add_argument("--prd", choices=sorted(v3_acceptance.CASES))
@@ -70,6 +72,8 @@ def main() -> None:
         sys.exit(v2_acceptance.run(args.prd))
     if args.command == "v3-daily":
         sys.exit(run_v3_daily())
+    if args.command == "v3-us-fetch":
+        sys.exit(fetch_us())
     if args.command == "v3-report":
         sys.exit(v3_report.run(V3_PATHS, v3_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, lambda: datetime.now(toss.KST)))
     if args.command == "v3-acceptance":
@@ -84,8 +88,13 @@ def fetch() -> int:
         return run_fetch(http, toss.read_credentials(ROOT), DB_PATH, lambda: datetime.now(toss.KST))
 
 
+def fetch_us() -> int:
+    with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
+        return v3_us.run(http, toss.read_credentials(ROOT), V3_PATHS.us, lambda: datetime.now(toss.KST))
+
+
 def run_v3_daily() -> int:
-    """v3 매일 실행. 시세는 v1 fetch 명령을 따로 실행해 받고, Codex 토큰은 trading-oracle과 함께 쓴다."""
+    """v3 매일 실행. 시세는 v3-us-fetch와 v1 fetch 명령을 따로 실행해 받고, Codex 토큰은 trading-oracle과 함께 쓴다."""
     clock = lambda: datetime.now(toss.KST)
 
     def fetch_market(seconds: float) -> int:
@@ -94,11 +103,14 @@ def run_v3_daily() -> int:
         except KeyError as error:
             print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
             return 1
-        try:
-            return subprocess.run(["rt-trading", "fetch"], timeout=seconds).returncode
-        except subprocess.TimeoutExpired:
-            print("V3_FETCH_TIMEOUT: 판단 마감 15분 전까지 시세를 다 받지 못해 멈췄다")
-            return 1
+        deadline, codes = time.monotonic() + seconds, []
+        for command in ("v3-us-fetch", "fetch"):  # 미국 시세는 그날 판단에 쓰이고 몇 초면 끝나서 먼저 받는다
+            try:
+                codes.append(subprocess.run(["rt-trading", command], timeout=deadline - time.monotonic()).returncode)
+            except subprocess.TimeoutExpired:
+                print(f"V3_FETCH_TIMEOUT: 판단 마감 15분 전까지 시세를 다 받지 못해 멈췄다({command})")
+                return 1
+        return 0 if codes == [0, 0] else 1
 
     with httpx.Client() as codex_http:
         return v3_daily.run(

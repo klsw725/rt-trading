@@ -29,6 +29,7 @@ class Paths(NamedTuple):
     copy: Path  # 정산한 날까지의 시세 사본 data/v3/market.sqlite3
     paper: Path  # 판단과 정산한 날 data/v3/paper.sqlite3
     head: Path  # 헤드 기록 폴더 data/v3/head
+    us: Path  # v3-us-fetch가 받는 미국 네 종목 일봉 data/us.sqlite3
 
 
 class Period(NamedTuple):
@@ -237,7 +238,7 @@ def run(
         if row is None:
             cal = calendar(source_days, period)
             accounts = summary(paths, period, cal, today, decisions)
-            content = v3_head.build_input(today, [day for day in cal if day[:7] == today[:7]], paths.source, accounts, decisions)
+            content = v3_head.build_input(today, [day for day in cal if day[:7] == today[:7]], paths.source, paths.us, accounts, decisions)
             row = v3_head.decide(paths.paper, paths.head, today, content, http, credentials, clock, sleep)
         if row is None:
             lines.append(f"판단: {today} 마감이 지나 하지 않았다")

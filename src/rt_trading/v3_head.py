@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 
-from rt_trading import codex, sessions
+from rt_trading import codex, sessions, v3_us
 from rt_trading.toss import KST
 
 KODEX200, INVERSE = "069500", "114800"
@@ -35,10 +35,10 @@ class HeadError(Exception):
         self.code = code
 
 
-def build_input(day: str, month_days: list[str], market_path: Path, accounts: dict, decisions: list[dict]) -> dict:
+def build_input(day: str, month_days: list[str], market_path: Path, us_path: Path, accounts: dict, decisions: list[dict]) -> dict:
     """판단일 day의 헤드 입력. 시세는 day 전의 일봉 수정 종가로만 계산하고, 가격 자체는 넣지 않는다.
 
-    month_days는 day가 속한 달의 거래일, accounts는 PRD 03이 정산 결과로 만든 계좌 요약이다.
+    month_days는 day가 속한 달의 거래일, us_path는 미국 네 종목 일봉 파일, accounts는 PRD 03이 정산 결과로 만든 계좌 요약이다.
       {"subordinates": {id: {"recent_returns_pct", "holding"}}, "head_account": {...}, "rule_head": {...},
        "head_returns": {날짜: 그날 헤드 계좌 수익률(%)}, "settled_through": 날짜 또는 None}
     decisions는 decisions 표의 행이다.
@@ -71,6 +71,7 @@ def build_input(day: str, month_days: list[str], market_path: Path, accounts: di
             },
             "inverse": {"daily_returns_pct": [pct(r) for r in _daily_returns([price for _, price in closes[INVERSE]])]},
         },
+        "us_market": _us_market(us_path, day),
         "subordinates": [
             {
                 "id": row["id"],
@@ -212,6 +213,19 @@ def insert(db_path: Path, row: dict) -> None:
 def _daily_returns(prices: list[Decimal]) -> list[Decimal]:
     """최근 20거래일 일별 수익률, 오래된 것부터."""
     return [prices[i] / prices[i - 1] - 1 for i in range(len(prices) - 20, len(prices))]
+
+
+def _us_market(path: Path, day: str) -> dict | None:
+    """미국 날짜가 day보다 앞선 일봉으로 만든 미국 시세 요약. 수익률은 종목마다 그 종목의 일봉(미국 거래일)으로 센다."""
+    if not path.exists():
+        return None
+    with closing(sqlite3.connect(path)) as db:
+        rows = db.execute("SELECT symbol, date, adj_close FROM us_candles_1d WHERE date < ? ORDER BY symbol, date", (day,)).fetchall()
+    closes = {symbol: [Decimal(close) for row_symbol, _, close in rows if row_symbol == symbol] for symbol in v3_us.SYMBOLS}
+    return {
+        "session_date": max(date for _, date, _ in rows),
+        "returns_pct": {symbol: {f"{k}d": pct(prices[-1] / prices[-1 - k] - 1) for k in (1, 5, 20)} for symbol, prices in closes.items()},
+    }
 
 
 def pct(value: Decimal) -> float:
