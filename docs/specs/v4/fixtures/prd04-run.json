@@ -1,0 +1,265 @@
+{
+  "start": "2024-11-11",
+  "holidays": [["2024-11-19", "시험용 휴장일"]],
+  "history": {"from": "2024-01-02", "to": "2024-11-08", "prices": {"069500": 10000, "114800": 5000}},
+  "omit_after": {"2024-11-14": "15:30"},
+  "broken_bars": {"069500": {"10:00": null}},
+  "token": {"access": "FAKE-ACCESS-7f3a91", "refresh": "FAKE-REFRESH-91c2d4", "account_id": "FAKE-ACCOUNT-55d0e8"},
+  "replies": {
+    "hold_kodex200": "{\"subordinate\": \"hold_kodex200\", \"reason\": \"오른다\", \"notes\": \"노트\"}",
+    "hold_inverse": "{\"subordinate\": \"hold_inverse\", \"reason\": \"내린다\", \"notes\": \"노트\"}",
+    "cash": "{\"subordinate\": \"cash\", \"reason\": \"쉰다\", \"notes\": \"노트\"}"
+  },
+  "bars": {"069500": {"09:01": [10000, 10000, 10000, 10000, 1000]}, "114800": {"09:01": [5000, 5000, 5000, 5000, 1000]}},
+  "news": [{"published_at": "2024-11-11T07:00:00+09:00", "source": "www.news1.kr", "title": "코스피 보합", "summary": "코스피가 보합이다."}],
+  "runs": [
+    {
+      "name": "시작일 개장 전 판단", "command": "daily", "at": "2024-11-11T07:30:00", "source": [], "reply": "hold_kodex200",
+      "expected": {
+        "exit": 0, "fetch_budget": 3900, "codex_calls": 1, "settled": [], "news_deadlines": ["2024-11-11T07:32:00+09:00"],
+        "output": ["판단: 2024-11-11 08:50 ok hold_kodex200"]
+      }
+    },
+    {
+      "name": "같은 날 v4-daily를 다시 실행", "command": "daily", "at": "2024-11-11T07:40:00", "source": [],
+      "expected": {
+        "exit": 0, "codex_calls": 0, "settled": [], "news_deadlines": [],
+        "output": ["판단: 2024-11-11 08:50 ok hold_kodex200"]
+      }
+    },
+    {
+      "name": "개장 전 차례는 v4-decide의 차례가 아님", "command": "decide", "slot": "08:50", "at": "2024-11-11T08:40:00",
+      "expected": {
+        "exit": 1, "codex_calls": 0, "bars_seconds": [], "news_deadlines": [], "unchanged": true,
+        "output": ["V4_SLOT_INVALID"]
+      }
+    },
+    {
+      "name": "차례에 시작한 장중 판단은 당일 1분봉 받기에 120초", "command": "decide", "slot": "10:00", "at": "2024-11-11T10:00:00", "reply": "hold_inverse",
+      "expected": {
+        "exit": 0, "codex_calls": 1, "bars_seconds": [120], "news_deadlines": ["2024-11-11T10:02:00+09:00"], "copy_unchanged": true,
+        "output": ["판단: 2024-11-11 10:00 ok hold_inverse", "지금 부하: hold_inverse, 남은 교체 1번"]
+      }
+    },
+    {
+      "name": "같은 차례를 다시 실행", "command": "decide", "slot": "10:00", "at": "2024-11-11T10:01:00",
+      "expected": {
+        "exit": 0, "codex_calls": 0, "bars_seconds": [], "news_deadlines": [], "unchanged": true,
+        "output": ["판단: 2024-11-11 10:00 ok hold_inverse"]
+      }
+    },
+    {
+      "name": "받기가 T + 2분까지 끝나지 않아도 마감 전에 판단", "command": "decide", "slot": "11:00", "at": "2024-11-11T11:00:30", "timeout": true, "reply": "hold_kodex200",
+      "expected": {
+        "exit": 0, "codex_calls": 1, "bars_seconds": [90], "news_deadlines": ["2024-11-11T11:02:00+09:00"], "nulls": true,
+        "output": ["판단: 2024-11-11 11:00 ok hold_kodex200", "지금 부하: hold_kodex200, 남은 교체 0번", "받기 실패: 당일 1분봉"]
+      }
+    },
+    {"name": "교체 두 번 뒤 다른 부하는 capped", "command": "decide", "slot": "12:00", "at": "2024-11-11T12:00:00", "reply": "cash"},
+    {
+      "name": "마감에 시작하면 받기·호출·판단 행이 없음", "command": "decide", "slot": "13:00", "at": "2024-11-11T13:05:00",
+      "expected": {
+        "exit": 1, "codex_calls": 0, "bars_seconds": [], "news_deadlines": [], "unchanged": true,
+        "output": ["V4_DEADLINE_PASSED"]
+      }
+    },
+    {"name": "마감까지 호출 오류", "command": "decide", "slot": "14:00", "at": "2024-11-11T14:00:00", "attempts": [["http", 100], ["http", 100], ["http", 100]]},
+    {
+      "name": "다음 날 정산과 토큰이 없는 개장 전 판단", "command": "daily", "at": "2024-11-12T07:30:00", "source": ["2024-11-11"], "no_token": true,
+      "expected": {
+        "exit": 1, "codex_calls": 0, "settled": ["2024-11-11"], "news_deadlines": ["2024-11-12T07:32:00+09:00"],
+        "output": ["판단: 2024-11-12 08:50 failed V3_CODEX_TOKEN_MISSING", "실패: V3_DECISION_FAILED"]
+      }
+    },
+    {"command": "report", "at": "2024-11-12T08:00:00"},
+    {
+      "name": "검증에 실패한 날에서 정산을 멈추고 판단은 함", "command": "daily", "at": "2024-11-13T07:30:00", "source": ["2024-11-11", "2024-11-12"], "broken": ["2024-11-12"], "reply": "hold_kodex200",
+      "expected": {
+        "exit": 1, "codex_calls": 1, "settled": ["2024-11-11"],
+        "output": ["V1_SESSION_MISMATCH 2024-11-12", "판단: 2024-11-13 08:50 ok hold_kodex200", "실패: V3_SETTLEMENT_STOPPED"]
+      }
+    },
+    {
+      "name": "v4-decide는 시세 사본과 정산을 바꾸지 않음", "command": "decide", "slot": "10:00", "at": "2024-11-13T10:00:00", "reply": "hold_kodex200",
+      "expected": {
+        "exit": 0, "codex_calls": 1, "bars_seconds": [120], "news_deadlines": ["2024-11-13T10:02:00+09:00"], "settled": ["2024-11-11"], "copy_unchanged": true,
+        "output": ["판단: 2024-11-13 10:00 ok hold_kodex200", "지금 부하: hold_kodex200, 남은 교체 2번"]
+      }
+    },
+    {
+      "name": "밀린 날을 오래된 날부터 정산", "command": "daily", "at": "2024-11-14T07:30:00", "source": ["2024-11-11", "2024-11-12", "2024-11-13"], "reply": "hold_inverse",
+      "expected": {
+        "exit": 0, "codex_calls": 1, "settled": ["2024-11-11", "2024-11-12", "2024-11-13"],
+        "output": ["판단: 2024-11-14 09:50 ok hold_inverse"]
+      }
+    },
+    {
+      "name": "휴장일 v4-daily", "command": "daily", "at": "2024-11-19T07:30:00",
+      "expected": {
+        "exit": 0, "codex_calls": 0, "unchanged": true,
+        "output": ["휴장일"]
+      }
+    },
+    {
+      "name": "휴장일 v4-decide", "command": "decide", "slot": "10:00", "at": "2024-11-19T10:00:00",
+      "expected": {
+        "exit": 0, "codex_calls": 0, "bars_seconds": [], "news_deadlines": [], "unchanged": true,
+        "output": ["휴장일"]
+      }
+    },
+    {
+      "name": "기간 전 v4-decide", "command": "decide", "slot": "10:00", "at": "2024-11-08T10:00:00",
+      "expected": {
+        "exit": 0, "codex_calls": 0, "bars_seconds": [], "news_deadlines": [], "unchanged": true,
+        "output": ["기간 전"]
+      }
+    },
+    {
+      "name": "기간 마지막 날까지 정산", "command": "daily", "at": "2024-11-18T07:30:00", "source": ["2024-11-11", "2024-11-12", "2024-11-13", "2024-11-14", "2024-11-15"],
+      "expected": {
+        "exit": 0, "codex_calls": 0, "news_deadlines": [], "settled": ["2024-11-11", "2024-11-12", "2024-11-13", "2024-11-14", "2024-11-15"],
+        "output": ["기간 종료"]
+      }
+    },
+    {
+      "name": "기간 끝 v4-decide", "command": "decide", "slot": "10:00", "at": "2024-11-18T10:00:00",
+      "expected": {
+        "exit": 0, "codex_calls": 0, "bars_seconds": [], "news_deadlines": [], "unchanged": true,
+        "output": ["기간 끝"]
+      }
+    },
+    {"command": "report", "at": "2024-11-18T08:00:00"},
+    {"command": "report", "at": "2024-11-18T08:05:00"}
+  ],
+  "decisions": [
+    ["2024-11-11", "08:50", "pre_open", false],
+    ["2024-11-11", "10:00", "intraday", false],
+    ["2024-11-11", "11:00", "intraday", false],
+    ["2024-11-11", "12:00", "intraday", false],
+    ["2024-11-11", "13:00", "intraday", true],
+    ["2024-11-11", "14:00", "intraday", false],
+    ["2024-11-11", "15:10", "pre_close", true],
+    ["2024-11-12", "08:50", "pre_open", false],
+    ["2024-11-12", "10:00", "intraday", true],
+    ["2024-11-12", "11:00", "intraday", true],
+    ["2024-11-12", "12:00", "intraday", true],
+    ["2024-11-12", "13:00", "intraday", true],
+    ["2024-11-12", "14:00", "intraday", true],
+    ["2024-11-12", "15:10", "pre_close", true],
+    ["2024-11-13", "08:50", "pre_open", false],
+    ["2024-11-13", "10:00", "intraday", false],
+    ["2024-11-13", "11:00", "intraday", true],
+    ["2024-11-13", "12:00", "intraday", true],
+    ["2024-11-13", "13:00", "intraday", true],
+    ["2024-11-13", "14:00", "intraday", true],
+    ["2024-11-13", "15:10", "pre_close", true],
+    ["2024-11-14", "09:50", "pre_open", false],
+    ["2024-11-14", "11:00", "intraday", true],
+    ["2024-11-14", "12:00", "intraday", true],
+    ["2024-11-14", "13:00", "intraday", true],
+    ["2024-11-14", "14:00", "intraday", true],
+    ["2024-11-14", "15:00", "intraday", true],
+    ["2024-11-14", "16:10", "pre_close", true],
+    ["2024-11-15", "08:50", "pre_open", true],
+    ["2024-11-15", "10:00", "intraday", true],
+    ["2024-11-15", "11:00", "intraday", true],
+    ["2024-11-15", "12:00", "intraday", true],
+    ["2024-11-15", "13:00", "intraday", true],
+    ["2024-11-15", "14:00", "intraday", true],
+    ["2024-11-15", "15:10", "pre_close", true]
+  ],
+  "mid": {
+    "run": {"decision_slots": 35, "settled_days": 1, "settled_through": "2024-11-11"},
+    "decisions": {"ok": 3, "capped": 1, "late": 0, "invalid": 0, "failed": 1, "missing": 2},
+    "head_final_equity": 498059
+  },
+  "final": {
+    "report": {
+      "run": {
+        "start": "2024-11-11", "end": "2024-11-15", "trading_days": 5, "decision_slots": 35, "settled_days": 5, "settled_through": "2024-11-15",
+        "model": "gpt-6-sol", "initial_capital": 500000, "commission_rate": 0.000188,
+        "loss_limits": {"daily": -0.02, "weekly": -0.05, "cumulative": -0.2}, "defect_days": ["2024-11-14"]
+      },
+      "decisions": {"ok": 6, "capped": 1, "late": 0, "invalid": 0, "failed": 2, "missing": 26},
+      "accounts": [
+        {"id": "head", "final_equity": 497967, "total_return": -0.004066, "max_drawdown": 0.004066, "trade_count": 3, "win_rate": 0.0, "avg_trade_pnl": -677.6666666666666, "commission_total": 553, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "morning", "final_equity": 499816, "total_return": -0.000368, "max_drawdown": 0.000368, "trade_count": 1, "win_rate": 0.0, "avg_trade_pnl": -184.0, "commission_total": 184, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "rule_head", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "cash", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "hold_kodex200", "final_equity": 499816, "total_return": -0.000368, "max_drawdown": 0.000368, "trade_count": 1, "win_rate": 0.0, "avg_trade_pnl": -184.0, "commission_total": 184, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "hold_inverse", "final_equity": 499814, "total_return": -0.000372, "max_drawdown": 0.000372, "trade_count": 1, "win_rate": 0.0, "avg_trade_pnl": -186.0, "commission_total": 186, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "noise_breakout", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "turn_of_month", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "trend_200", "final_equity": 499814, "total_return": -0.000372, "max_drawdown": 0.000372, "trade_count": 1, "win_rate": 0.0, "avg_trade_pnl": -186.0, "commission_total": 186, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "last_half_hour", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0, "trade_count": 0, "win_rate": null, "avg_trade_pnl": null, "commission_total": 0, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "overnight_trend", "final_equity": 499442, "total_return": -0.001116, "max_drawdown": 0.001116, "trade_count": 3, "win_rate": 0.0, "avg_trade_pnl": -186.0, "commission_total": 558, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0},
+        {"id": "overnight", "final_equity": 499448, "total_return": -0.001104, "max_drawdown": 0.001104, "trade_count": 3, "win_rate": 0.0, "avg_trade_pnl": -184.0, "commission_total": 552, "tax_total": 0, "limit_triggers": {"daily": 0, "weekly": 0, "cumulative": 0}, "distribution_total": 0, "distribution_tax_total": 0}
+      ],
+      "verdict": {"criteria": {"no_decision_failures": false, "drawdown_below_limit": true}, "passed": false}
+    },
+    "decisions_csv": [
+      ["2024-11-11", "08:50", "pre_open", "hold_kodex200", "오른다", "ok", "gpt-6-sol", "", -0.003882],
+      ["2024-11-11", "10:00", "intraday", "hold_inverse", "내린다", "ok", "gpt-6-sol", "", -0.003882],
+      ["2024-11-11", "11:00", "intraday", "hold_kodex200", "오른다", "ok", "gpt-6-sol", "", -0.003882],
+      ["2024-11-11", "12:00", "intraday", "cash", "쉰다", "capped", "gpt-6-sol", "", -0.003882],
+      ["2024-11-11", "13:00", "intraday", "", "", "missing", "", "", -0.003882],
+      ["2024-11-11", "14:00", "intraday", "", "", "failed", "gpt-6-sol", "", -0.003882],
+      ["2024-11-11", "15:10", "pre_close", "", "", "missing", "", "", -0.003882],
+      ["2024-11-12", "08:50", "pre_open", "", "", "failed", "gpt-6-sol", "", 0.0],
+      ["2024-11-12", "10:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-12", "11:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-12", "12:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-12", "13:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-12", "14:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-12", "15:10", "pre_close", "", "", "missing", "", "", 0.0],
+      ["2024-11-13", "08:50", "pre_open", "hold_kodex200", "오른다", "ok", "gpt-6-sol", "", 0.0],
+      ["2024-11-13", "10:00", "intraday", "hold_kodex200", "오른다", "ok", "gpt-6-sol", "", 0.0],
+      ["2024-11-13", "11:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-13", "12:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-13", "13:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-13", "14:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-13", "15:10", "pre_close", "", "", "missing", "", "", 0.0],
+      ["2024-11-14", "09:50", "pre_open", "hold_inverse", "내린다", "ok", "gpt-6-sol", "", 0.0],
+      ["2024-11-14", "11:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-14", "12:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-14", "13:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-14", "14:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-14", "15:00", "intraday", "", "", "missing", "", "", 0.0],
+      ["2024-11-14", "16:10", "pre_close", "", "", "missing", "", "", 0.0],
+      ["2024-11-15", "08:50", "pre_open", "", "", "missing", "", "", -0.00018471707167222462],
+      ["2024-11-15", "10:00", "intraday", "", "", "missing", "", "", -0.00018471707167222462],
+      ["2024-11-15", "11:00", "intraday", "", "", "missing", "", "", -0.00018471707167222462],
+      ["2024-11-15", "12:00", "intraday", "", "", "missing", "", "", -0.00018471707167222462],
+      ["2024-11-15", "13:00", "intraday", "", "", "missing", "", "", -0.00018471707167222462],
+      ["2024-11-15", "14:00", "intraday", "", "", "missing", "", "", -0.00018471707167222462],
+      ["2024-11-15", "15:10", "pre_close", "", "", "missing", "", "", -0.00018471707167222462]
+    ],
+    "trades_head": [
+      ["2024-11-11T09:01:00+09:00", "069500", "buy", "49", "10000", "92", "0", "signal"],
+      ["2024-11-11T10:06:00+09:00", "069500", "sell", "49", "9995", "92", "0", "switch_head"],
+      ["2024-11-11T10:06:00+09:00", "114800", "buy", "99", "5005", "93", "0", "signal"],
+      ["2024-11-11T11:06:00+09:00", "114800", "sell", "99", "4995", "92", "0", "switch_head"],
+      ["2024-11-11T11:06:00+09:00", "069500", "buy", "49", "10005", "92", "0", "signal"],
+      ["2024-11-15T09:01:00+09:00", "069500", "sell", "49", "10000", "92", "0", "switch_head"]
+    ],
+    "files": [
+      "decisions.csv", "report.json", "trades-cash.csv", "trades-head.csv", "trades-hold_inverse.csv", "trades-hold_kodex200.csv", "trades-last_half_hour.csv",
+      "trades-morning.csv", "trades-noise_breakout.csv", "trades-overnight.csv", "trades-overnight_trend.csv", "trades-rule_head.csv", "trades-trend_200.csv",
+      "trades-turn_of_month.csv"
+    ]
+  },
+  "verdict_cases": [
+    {
+      "name": "판단 실패가 한 번이면 불통과", "statuses": ["ok", "capped", "missing"], "equity": 499000,
+      "expected": {"criteria": {"no_decision_failures": false, "drawdown_below_limit": true}, "passed": false}
+    },
+    {
+      "name": "capped만 있으면 통과", "statuses": ["ok", "capped", "ok"], "equity": 499000,
+      "expected": {"criteria": {"no_decision_failures": true, "drawdown_below_limit": true}, "passed": true}
+    },
+    {
+      "name": "최대 낙폭이 정확히 20%면 불통과", "statuses": ["ok", "ok", "ok"], "equity": 400000,
+      "expected": {"criteria": {"no_decision_failures": true, "drawdown_below_limit": false}, "passed": false}
+    }
+  ]
+}

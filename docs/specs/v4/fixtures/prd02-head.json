@@ -1,0 +1,391 @@
+{
+  "market": {
+    "start": "2025-03-03",
+    "end": "2026-01-02",
+    "holidays": ["2025-12-25", "2025-12-31", "2026-01-01"],
+    "base": {"069500": 10000, "114800": 5000},
+    "changes": {
+      "2025-12-29": {"069500": 11000, "114800": 4500},
+      "2025-12-30": {"069500": 10450, "114800": 4725},
+      "2026-01-02": {"069500": 10659, "114800": 4536}
+    },
+    "future": {
+      "2026-01-05": {"069500": 50000, "114800": 1000},
+      "2026-01-06": {"069500": 3000, "114800": 9000}
+    }
+  },
+  "us_market": {
+    "start": "2025-11-03",
+    "end": "2026-01-02",
+    "holidays": ["2025-11-27", "2025-12-25", "2026-01-01"],
+    "base": {"SOXX": "250", "QQQ": "500", "SPY": "600", "MU": "100"},
+    "changes": {
+      "2025-12-03": {"SOXX": "312.5", "QQQ": "534", "SPY": "799", "MU": "203"},
+      "2025-12-24": {"SOXX": "220", "QQQ": "445", "SPY": "510", "MU": "70"},
+      "2025-12-31": {"SOXX": "200"},
+      "2026-01-02": {"SOXX": "275", "QQQ": "500.625", "SPY": "599.25", "MU": "101.5"}
+    },
+    "future": {
+      "2026-01-05": {"SOXX": "1", "QQQ": "1", "SPY": "1", "MU": "1"},
+      "2026-01-06": {"SOXX": "9999", "QQQ": "9999", "SPY": "9999", "MU": "9999"}
+    }
+  },
+  "month_days": [
+    "2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09", "2026-01-12", "2026-01-13",
+    "2026-01-14", "2026-01-15", "2026-01-16", "2026-01-19", "2026-01-20", "2026-01-21", "2026-01-22", "2026-01-23",
+    "2026-01-26", "2026-01-27", "2026-01-28", "2026-01-29", "2026-01-30"
+  ],
+  "accounts": {
+    "subordinates": {
+      "cash": {"recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null},
+      "hold_kodex200": {"recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"},
+      "hold_inverse": {"recent_returns_pct": {"1d": -4.02, "5d": -9.31, "20d": -9.31}, "holding": "114800"},
+      "noise_breakout": {"recent_returns_pct": {"1d": 0.0, "5d": -0.41, "20d": -0.41}, "holding": null},
+      "turn_of_month": {"recent_returns_pct": {"1d": 1.99, "5d": 1.98, "20d": 1.98}, "holding": "069500"},
+      "trend_200": {"recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"},
+      "last_half_hour": {"recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null},
+      "overnight_trend": {"recent_returns_pct": {"1d": 0.52, "5d": 1.1, "20d": 1.1}, "holding": null},
+      "overnight": {"recent_returns_pct": {"1d": 0.31, "5d": 0.85, "20d": 0.85}, "holding": "069500"}
+    },
+    "head_account": {
+      "subordinate": "trend_200",
+      "holding": "069500",
+      "return_since_start_pct": 1.23,
+      "max_drawdown_pct": 0.5,
+      "limits": {"weekly": false, "cumulative": false}
+    },
+    "rule_head": {"return_since_start_pct": 0.8, "max_drawdown_pct": 0.3},
+    "morning_account": {"return_since_start_pct": 0.95, "max_drawdown_pct": 0.4},
+    "head_returns": {"2026-01-02": -0.2},
+    "settled_through": "2026-01-02"
+  },
+  "token": {"access": "FAKE-ACCESS-7f3a91", "refresh": "FAKE-REFRESH-91c2d4", "account_id": "FAKE-ACCOUNT-55d0e8"},
+  "ok_text": "{\"subordinate\": \"hold_kodex200\", \"reason\": \"오른다\", \"notes\": \"오후에 다시 본다\"}",
+  "invalid_text": "오늘은 hold_kodex200을 고른다",
+  "input": {
+    "day": "2026-01-05",
+    "slot": "11:00",
+    "days": ["2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08"],
+    "decisions": [
+      {"date": "2026-01-02", "slot": "09:50", "kind": "pre_open", "status": "ok", "subordinate": "hold_kodex200", "reason": "보유 시작", "notes": "노트 하나"},
+      {"date": "2026-01-02", "slot": "11:00", "kind": "intraday", "status": "ok", "subordinate": "trend_200", "reason": "추세 위", "notes": "노트 둘"},
+      {"date": "2026-01-02", "slot": "15:10", "kind": "pre_close", "status": "failed", "subordinate": "", "reason": "", "notes": ""},
+      {"date": "2026-01-05", "slot": "08:50", "kind": "pre_open", "status": "late", "subordinate": "cash", "reason": "", "notes": ""},
+      {"date": "2026-01-05", "slot": "10:00", "kind": "intraday", "status": "ok", "subordinate": "hold_inverse", "reason": "하락 전환", "notes": "노트 셋"}
+    ],
+    "raw_news": [
+      {"title": "<b>코스피</b> &quot;반등&quot; 기대", "originallink": "https://www.news1.kr/finance/0105", "link": "https://n.news.naver.com/mnews/article/421/0000000105", "description": "<b>코스피</b>가 오전 장에서 반등 흐름을 보였다.", "pubDate": "Mon, 05 Jan 2026 10:58:00 +0900"},
+      {"title": "환율 하락", "originallink": "", "link": "https://n.news.naver.com/mnews/article/015/0000000106", "description": "원/달러 <b>환율</b>이 내렸다.", "pubDate": "Mon, 05 Jan 2026 10:20:00 +0900"}
+    ],
+    "after_news": [
+      [{"title": "장중 급등", "originallink": "https://www.example.com/a1", "link": "https://n.news.naver.com/a1", "description": "11시 1분 기사", "pubDate": "Mon, 05 Jan 2026 11:01:00 +0900"}],
+      [
+        {"title": "장중 급락", "originallink": "https://www.example.com/b1", "link": "https://n.news.naver.com/b1", "description": "11시 기사", "pubDate": "Mon, 05 Jan 2026 11:00:00 +0900"},
+        {"title": "오후 전망", "originallink": "https://www.example.com/b2", "link": "https://n.news.naver.com/b2", "description": "14시 기사", "pubDate": "Mon, 05 Jan 2026 14:00:00 +0900"}
+      ]
+    ],
+    "bars": {
+      "069500": {
+        "08:40": [10500, 10500, 10500, 10500, 300],
+        "08:59": [10600, 10600, 10600, 10600, 0],
+        "09:01": [10700, 10700, 10700, 10700, 5000],
+        "09:15": [10720, 10800, 10690, 10780, 800],
+        "09:30": [10760, 10770, 10740, 10750, 600],
+        "10:00": [10740, 10745, 10600, 10620, 700],
+        "10:30": [10630, 10660, 10625, 10650, 400],
+        "11:00": [10660, 10700, 10655, 10690, 500]
+      },
+      "114800": {
+        "08:40": [4600, 4600, 4600, 4600, 200],
+        "08:59": [4530, 4530, 4530, 4530, 0],
+        "09:01": [4520, 4520, 4520, 4520, 3000],
+        "09:30": [4515, 4516, 4505, 4510, 500],
+        "10:00": [4512, 4560, 4511, 4555, 400],
+        "10:30": [4550, 4552, 4540, 4545, 300],
+        "11:00": [4540, 4541, 4500, 4530, 200]
+      }
+    },
+    "future_bars": {
+      "069500": {"11:01": [12000, 12500, 9000, 12400, 50000], "15:30": [13000, 13000, 13000, 13000, 70000]},
+      "114800": {"11:01": [3000, 6000, 2900, 5900, 40000]}
+    },
+    "expected": {
+      "decision_date": "2026-01-05",
+      "decision": {"kind": "intraday", "deadline": "11:05", "current": "hold_inverse", "switches_left": 1},
+      "session": {"open": "09:00", "close": "15:30", "note": ""},
+      "month_position": {"from_start": 2, "from_end": 20},
+      "data_through": "2026-01-02",
+      "market": {
+        "kodex200": {
+          "daily_returns_pct": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, -5.0, 2.0],
+          "returns_pct": {"1d": 2.0, "5d": 6.59, "20d": 6.59, "60d": 6.59},
+          "vs_average_pct": {"5d": 2.28, "20d": 5.48, "60d": 6.22, "200d": 6.48},
+          "volatility_20d_pct": 40.97,
+          "drawdown_60d_pct": -3.1
+        },
+        "inverse": {
+          "daily_returns_pct": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -10.0, 5.0, -4.0]
+        }
+      },
+      "us_market": {
+        "session_date": "2026-01-02",
+        "returns_pct": {
+          "SOXX": {"1d": 37.5, "5d": 25.0, "20d": -12.0},
+          "QQQ": {"1d": 0.13, "5d": 12.5, "20d": -6.25},
+          "SPY": {"1d": -0.13, "5d": 17.5, "20d": -25.0},
+          "MU": {"1d": 1.5, "5d": 45.0, "20d": -50.0}
+        }
+      },
+      "today_market": {
+        "kodex200": {"data_through": "11:00", "vs_prev_close_pct": 0.29, "vs_open_pct": -0.09, "range_position_pct": 45.0, "last_30m_pct": 0.38, "returns_30m_pct": [0.47, -1.21, 0.28, 0.38]},
+        "inverse": {"data_through": "11:00", "vs_prev_close_pct": -0.13, "vs_open_pct": 0.22, "range_position_pct": 50.0, "last_30m_pct": -0.33, "returns_30m_pct": [-0.22, 1.0, -0.22, -0.33]}
+      },
+      "news": [
+        {"published_at": "2026-01-05T10:58:00+09:00", "source": "www.news1.kr", "title": "코스피 \"반등\" 기대", "summary": "코스피가 오전 장에서 반등 흐름을 보였다."},
+        {"published_at": "2026-01-05T10:20:00+09:00", "source": "n.news.naver.com", "title": "환율 하락", "summary": "원/달러 환율이 내렸다."}
+      ],
+      "subordinates": [
+        {"id": "cash", "description": "아무것도 사지 않고 현금으로 쉰다", "backtest": "없음", "recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null},
+        {"id": "hold_kodex200", "description": "계좌가 비어 있으면 개장 때 KODEX 200을 사서 계속 든다", "backtest": "없음", "recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"},
+        {"id": "hold_inverse", "description": "계좌가 비어 있으면 개장 때 KODEX 인버스를 사서 계속 든다", "backtest": "없음", "recent_returns_pct": {"1d": -4.02, "5d": -9.31, "20d": -9.31}, "holding": "114800"},
+        {
+          "id": "noise_breakout",
+          "description": "개장 30분 뒤부터 30분마다, KODEX 200이 최근 14거래일의 평소 움직임보다 크게 오르면 KODEX 200을, 크게 내리면 인버스를 사고 손절·방향 전환을 한다. 그날 종가에 모두 판다",
+          "backtest": "v1 1분봉(2022-11~2026-10) 총수익 −20.08%, 최대 낙폭 20.47%, 2023-09-12 누적 손실 한도 발동",
+          "recent_returns_pct": {"1d": 0.0, "5d": -0.41, "20d": -0.41}, "holding": null
+        },
+        {
+          "id": "turn_of_month", "description": "달 마지막 거래일의 전 거래일 종가에 KODEX 200을 사서 다음 달 셋째 거래일 종가에 판다",
+          "backtest": "v2 일봉(2002~2026) 총수익 +173.0%, 최대 낙폭 41.45%", "recent_returns_pct": {"1d": 1.99, "5d": 1.98, "20d": 1.98}, "holding": "069500"
+        },
+        {
+          "id": "trend_200", "description": "전 거래일 KODEX 200이 200거래일 평균보다 높으면 KODEX 200, 아니면 인버스를 들고 간다. 바꿀 때는 종가에 갈아탄다",
+          "backtest": "v2 일봉(2009~2026) 총수익 +65.7%, 최대 낙폭 67.17%, 앞 기간 −29.96%", "recent_returns_pct": {"1d": 1.99, "5d": 6.57, "20d": 6.57}, "holding": "069500"
+        },
+        {
+          "id": "last_half_hour", "description": "개장 30분 뒤 KODEX 200이 기준가보다 높으면 마감 30분 전에 사서 그날 종가에 판다",
+          "backtest": "v2 1분봉(2022~2026) 총수익 −20.08%, 최대 낙폭 20.23%", "recent_returns_pct": {"1d": 0.0, "5d": 0.0, "20d": 0.0}, "holding": null
+        },
+        {
+          "id": "overnight_trend", "description": "전 거래일 추세가 위면 KODEX 200, 아래면 인버스를 종가에 사서 다음 거래일 시가에 판다",
+          "backtest": "v2 일봉(2009~2026) 총수익 −20.41%, 최대 낙폭 71.06%", "recent_returns_pct": {"1d": 0.52, "5d": 1.1, "20d": 1.1}, "holding": null
+        },
+        {
+          "id": "overnight", "description": "마감 10분 전에 KODEX 200 매수 주문을 내 그날 종가에 사고, 다음 거래일 시가에 판다",
+          "backtest": "v0 일봉(2002-10~2026-10) 총수익 +315.3%, 최대 낙폭 44.30%", "recent_returns_pct": {"1d": 0.31, "5d": 0.85, "20d": 0.85}, "holding": "069500"
+        }
+      ],
+      "head_account": {
+        "subordinate": "trend_200",
+        "holding": "069500",
+        "return_since_start_pct": 1.23,
+        "max_drawdown_pct": 0.5,
+        "limits": {"weekly": false, "cumulative": false}
+      },
+      "rule_head": {"return_since_start_pct": 0.8, "max_drawdown_pct": 0.3},
+      "morning_account": {"return_since_start_pct": 0.95, "max_drawdown_pct": 0.4},
+      "recent_decisions": [
+        {"date": "2026-01-02", "slot": "09:50", "kind": "pre_open", "status": "ok", "subordinate": "hold_kodex200", "reason": "보유 시작", "head_return_pct": -0.2},
+        {"date": "2026-01-02", "slot": "11:00", "kind": "intraday", "status": "ok", "subordinate": "trend_200", "reason": "추세 위", "head_return_pct": -0.2},
+        {"date": "2026-01-02", "slot": "15:10", "kind": "pre_close", "status": "failed", "subordinate": "", "reason": "", "head_return_pct": -0.2},
+        {"date": "2026-01-05", "slot": "08:50", "kind": "pre_open", "status": "late", "subordinate": "cash", "reason": "", "head_return_pct": null},
+        {"date": "2026-01-05", "slot": "10:00", "kind": "intraday", "status": "ok", "subordinate": "hold_inverse", "reason": "하락 전환", "head_return_pct": null}
+      ],
+      "settled_through": "2026-01-02",
+      "notes": "노트 셋"
+    },
+    "missing": [
+      {
+        "bars": ["069500"],
+        "today_market": {
+          "kodex200": {"data_through": "11:00", "vs_prev_close_pct": 0.29, "vs_open_pct": -0.09, "range_position_pct": 45.0, "last_30m_pct": 0.38, "returns_30m_pct": [0.47, -1.21, 0.28, 0.38]},
+          "inverse": null
+        }
+      },
+      {"bars": [], "today_market": null}
+    ]
+  },
+  "slots": {
+    "2026-01-05": [
+      ["08:50", "pre_open", "08:50", "09:00"], ["10:00", "intraday", "10:05", "10:05"], ["11:00", "intraday", "11:05", "11:05"],
+      ["12:00", "intraday", "12:05", "12:05"], ["13:00", "intraday", "13:05", "13:05"], ["14:00", "intraday", "14:05", "14:05"],
+      ["15:10", "pre_close", "15:15", "15:15"]
+    ],
+    "2026-01-02": [
+      ["09:50", "pre_open", "09:50", "10:00"], ["11:00", "intraday", "11:05", "11:05"], ["12:00", "intraday", "12:05", "12:05"],
+      ["13:00", "intraday", "13:05", "13:05"], ["14:00", "intraday", "14:05", "14:05"], ["15:10", "pre_close", "15:15", "15:15"]
+    ],
+    "2025-11-13": [
+      ["09:50", "pre_open", "09:50", "10:00"], ["11:00", "intraday", "11:05", "11:05"], ["12:00", "intraday", "12:05", "12:05"],
+      ["13:00", "intraday", "13:05", "13:05"], ["14:00", "intraday", "14:05", "14:05"], ["15:00", "intraday", "15:05", "15:05"],
+      ["16:10", "pre_close", "16:15", "16:15"]
+    ]
+  },
+  "deadline_cases": [
+    {
+      "name": "장중 실패 뒤 15초마다 다시 불러 정상",
+      "date": "2026-01-05", "slot": "11:00", "start": "11:00:10",
+      "attempts": [["http", 5], ["network", 5], ["invalid", 5], ["ok", 5]],
+      "expected": {
+        "status": "ok", "subordinate": "hold_kodex200", "reason": "오른다", "notes": "오후에 다시 본다", "attempts": 4, "error": "",
+        "finished_at": "2026-01-05T11:01:15+09:00", "waits": [15, 15, 15], "plan": ["cash", [["11:05", "hold_kodex200"]]]
+      }
+    },
+    {
+      "name": "장중 마감 1초 전에 마침",
+      "date": "2026-01-05", "slot": "11:00", "start": "11:04:00", "attempts": [["ok", 59]],
+      "expected": {
+        "status": "ok", "subordinate": "hold_kodex200", "reason": "오른다", "notes": "오후에 다시 본다", "attempts": 1, "error": "",
+        "finished_at": "2026-01-05T11:04:59+09:00", "waits": [], "plan": ["cash", [["11:05", "hold_kodex200"]]]
+      }
+    },
+    {
+      "name": "장중 마감 11:05에 마침",
+      "date": "2026-01-05", "slot": "11:00", "start": "11:04:00", "attempts": [["ok", 60]],
+      "expected": {
+        "status": "late", "subordinate": "hold_kodex200", "reason": "", "notes": "", "attempts": 1, "error": "",
+        "finished_at": "2026-01-05T11:05:00+09:00", "waits": [], "plan": ["cash", []]
+      }
+    },
+    {
+      "name": "장중 마감까지 형식 오류",
+      "date": "2026-01-05", "slot": "11:00", "start": "11:04:00",
+      "attempts": [["invalid", 10], ["invalid", 10], ["invalid", 10], ["invalid", 10]],
+      "expected": {
+        "status": "invalid", "subordinate": "", "reason": "", "notes": "", "attempts": 3, "error": "V3_HEAD_RESPONSE_INVALID",
+        "finished_at": "2026-01-05T11:05:00+09:00", "waits": [15, 15], "plan": ["cash", []]
+      }
+    },
+    {
+      "name": "장중 마감까지 호출 오류",
+      "date": "2026-01-05", "slot": "11:00", "start": "11:04:00",
+      "attempts": [["http", 10], ["http", 10], ["http", 10], ["http", 10]],
+      "expected": {
+        "status": "failed", "subordinate": "", "reason": "", "notes": "", "attempts": 3, "error": "V3_CODEX_HTTP_ERROR",
+        "finished_at": "2026-01-05T11:05:00+09:00", "waits": [15, 15], "plan": ["cash", []]
+      }
+    },
+    {
+      "name": "장중 마감 11:05에 시작하면 부르지도 기록하지도 않음",
+      "date": "2026-01-05", "slot": "11:00", "start": "11:05:00", "attempts": [],
+      "expected": null
+    },
+    {
+      "name": "개장 전 다시 부르는 간격 1·2·4·4분 뒤 정상",
+      "date": "2026-01-05", "slot": "08:50", "start": "08:00:00",
+      "attempts": [["http", 5], ["network", 5], ["invalid", 5], ["http", 5], ["ok", 5]],
+      "expected": {
+        "status": "ok", "subordinate": "hold_kodex200", "reason": "오른다", "notes": "오후에 다시 본다", "attempts": 5, "error": "",
+        "finished_at": "2026-01-05T08:11:25+09:00", "waits": [60, 120, 240, 240], "plan": ["hold_kodex200", []]
+      }
+    },
+    {
+      "name": "정상일 개장 전 마감 1초 전에 마침",
+      "date": "2026-01-05", "slot": "08:50", "start": "08:49:00", "attempts": [["ok", 59]],
+      "expected": {
+        "status": "ok", "subordinate": "hold_kodex200", "reason": "오른다", "notes": "오후에 다시 본다", "attempts": 1, "error": "",
+        "finished_at": "2026-01-05T08:49:59+09:00", "waits": [], "plan": ["hold_kodex200", []]
+      }
+    },
+    {
+      "name": "정상일 개장 전 마감 08:50에 마침",
+      "date": "2026-01-05", "slot": "08:50", "start": "08:49:00", "attempts": [["ok", 60]],
+      "expected": {
+        "status": "late", "subordinate": "hold_kodex200", "reason": "", "notes": "", "attempts": 1, "error": "",
+        "finished_at": "2026-01-05T08:50:00+09:00", "waits": [], "plan": ["cash", []]
+      }
+    },
+    {
+      "name": "10시 개장일 개장 전 마감 1초 전에 마침",
+      "date": "2026-01-02", "slot": "09:50", "start": "09:49:00", "attempts": [["ok", 59]],
+      "expected": {
+        "status": "ok", "subordinate": "hold_kodex200", "reason": "오른다", "notes": "오후에 다시 본다", "attempts": 1, "error": "",
+        "finished_at": "2026-01-02T09:49:59+09:00", "waits": [], "plan": ["hold_kodex200", []]
+      }
+    },
+    {
+      "name": "10시 개장일 개장 전 마감 09:50에 마침",
+      "date": "2026-01-02", "slot": "09:50", "start": "09:49:00", "attempts": [["ok", 60]],
+      "expected": {
+        "status": "late", "subordinate": "hold_kodex200", "reason": "", "notes": "", "attempts": 1, "error": "",
+        "finished_at": "2026-01-02T09:50:00+09:00", "waits": [], "plan": ["cash", []]
+      }
+    }
+  ],
+  "responses": [
+    {"name": "목록 밖 id", "text": "{\"subordinate\": \"leverage_2x\", \"reason\": \"크게 건다\", \"notes\": \"\"}", "valid": false},
+    {"name": "다른 키", "text": "{\"subordinate\": \"cash\", \"reason\": \"\", \"notes\": \"\", \"loss_limit\": \"-50%\"}", "valid": false},
+    {"name": "reason 501자", "lengths": {"reason": 501, "notes": 0}, "valid": false},
+    {"name": "overnight", "text": "{\"subordinate\": \"overnight\", \"reason\": \"밤사이에 든다\", \"notes\": \"\"}", "valid": true}
+  ],
+  "plan": {
+    "days": ["2026-01-05", "2026-01-06", "2026-01-07"],
+    "decisions": [
+      {"date": "2026-01-05", "slot": "08:50", "kind": "pre_open", "status": "failed", "subordinate": ""},
+      {"date": "2026-01-05", "slot": "10:00", "kind": "intraday", "status": "ok", "subordinate": "hold_kodex200"},
+      {"date": "2026-01-05", "slot": "11:00", "kind": "intraday", "status": "ok", "subordinate": "hold_kodex200"},
+      {"date": "2026-01-05", "slot": "12:00", "kind": "intraday", "status": "invalid", "subordinate": ""},
+      {"date": "2026-01-05", "slot": "13:00", "kind": "intraday", "status": "ok", "subordinate": "hold_inverse"},
+      {"date": "2026-01-05", "slot": "14:00", "kind": "intraday", "status": "capped", "subordinate": "cash"},
+      {"date": "2026-01-05", "slot": "15:10", "kind": "pre_close", "status": "late", "subordinate": "overnight"},
+      {"date": "2026-01-06", "slot": "08:50", "kind": "pre_open", "status": "invalid", "subordinate": ""},
+      {"date": "2026-01-06", "slot": "10:00", "kind": "intraday", "status": "ok", "subordinate": "noise_breakout"},
+      {"date": "2026-01-07", "slot": "08:50", "kind": "pre_open", "status": "ok", "subordinate": "cash"},
+      {"date": "2026-01-07", "slot": "15:10", "kind": "pre_close", "status": "ok", "subordinate": "overnight"}
+    ],
+    "expected": {
+      "2026-01-05": ["cash", [["10:05", "hold_kodex200"], ["13:05", "hold_inverse"]]],
+      "2026-01-06": ["hold_inverse", [["10:05", "noise_breakout"]]],
+      "2026-01-07": ["cash", [["15:15", "overnight"]]]
+    }
+  },
+  "day": {
+    "days": ["2026-01-05", "2026-01-06"],
+    "steps": [
+      {
+        "date": "2026-01-05", "slot": "08:50", "start": "08:40:00",
+        "attempts": [["ok", 5, "{\"subordinate\": \"hold_kodex200\", \"reason\": \"개장 전에 산다\", \"notes\": \"노트 1\"}"]],
+        "decision": {"kind": "pre_open", "deadline": "08:50", "current": "cash", "switches_left": 2}, "notes": "", "status": "ok"
+      },
+      {
+        "date": "2026-01-05", "slot": "10:00", "start": "10:00:10",
+        "attempts": [["ok", 5, "{\"subordinate\": \"hold_inverse\", \"reason\": \"내린다\", \"notes\": \"노트 2\"}"]],
+        "decision": {"kind": "intraday", "deadline": "10:05", "current": "hold_kodex200", "switches_left": 2}, "notes": "노트 1", "status": "ok"
+      },
+      {
+        "date": "2026-01-05", "slot": "11:00", "start": "11:00:10",
+        "attempts": [["ok", 5, "{\"subordinate\": \"hold_inverse\", \"reason\": \"그대로 둔다\", \"notes\": \"노트 3\"}"]],
+        "decision": {"kind": "intraday", "deadline": "11:05", "current": "hold_inverse", "switches_left": 1}, "notes": "노트 2", "status": "ok"
+      },
+      {
+        "date": "2026-01-05", "slot": "12:00", "start": "12:00:10",
+        "attempts": [["ok", 5, "{\"subordinate\": \"cash\", \"reason\": \"쉰다\", \"notes\": \"노트 4\"}"]],
+        "decision": {"kind": "intraday", "deadline": "12:05", "current": "hold_inverse", "switches_left": 1}, "notes": "노트 3", "status": "ok"
+      },
+      {
+        "date": "2026-01-05", "slot": "13:00", "start": "13:00:10",
+        "attempts": [["ok", 5, "{\"subordinate\": \"hold_kodex200\", \"reason\": \"다시 오른다\", \"notes\": \"노트 5\"}"]],
+        "decision": {"kind": "intraday", "deadline": "13:05", "current": "cash", "switches_left": 0}, "notes": "노트 4", "status": "capped"
+      },
+      {
+        "date": "2026-01-05", "slot": "14:00", "start": "14:04:50",
+        "attempts": [["http", 10]],
+        "decision": {"kind": "intraday", "deadline": "14:05", "current": "cash", "switches_left": 0}, "notes": "노트 5", "status": "failed"
+      },
+      {
+        "date": "2026-01-05", "slot": "15:10", "start": "15:10:10",
+        "attempts": [["ok", 5, "{\"subordinate\": \"cash\", \"reason\": \"밤에는 쉰다\", \"notes\": \"노트 7\"}"]],
+        "decision": {"kind": "pre_close", "deadline": "15:15", "current": "cash", "switches_left": 0}, "notes": "노트 5", "status": "ok"
+      },
+      {
+        "date": "2026-01-06", "slot": "08:50", "start": "08:40:00",
+        "attempts": [["ok", 5, "{\"subordinate\": \"hold_kodex200\", \"reason\": \"새날\", \"notes\": \"노트 8\"}"]],
+        "decision": {"kind": "pre_open", "deadline": "08:50", "current": "cash", "switches_left": 2}, "notes": "노트 7", "status": "ok"
+      }
+    ],
+    "plan": {
+      "2026-01-05": ["hold_kodex200", [["10:05", "hold_inverse"], ["12:05", "cash"]]],
+      "2026-01-06": ["hold_kodex200", []]
+    }
+  }
+}

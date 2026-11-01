@@ -52,17 +52,17 @@ def is_trading_day(day: str, holidays: set[str]) -> bool:
     return Date.fromisoformat(day).weekday() < 5 and day not in holidays
 
 
-def load_period(period_path: Path, holidays_path: Path) -> Period:
-    """기간 시작일과 휴장일 표를 읽어 기간의 5거래일을 정한다."""
+def load_period(period_path: Path, holidays_path: Path, code: str = "V3_PERIOD_INVALID") -> Period:
+    """기간 시작일과 휴장일 표를 읽어 기간의 5거래일을 정한다. 설정이 틀리면 code의 오류다(v4는 V4_PERIOD_INVALID)."""
     with holidays_path.open(encoding="utf-8") as file:
         holidays = {row["date"] for row in csv.DictReader(file)}
     try:
         start = json.loads(period_path.read_text(encoding="utf-8"))["start"]
         day = Date.fromisoformat(start)
     except (OSError, ValueError, KeyError, TypeError) as error:
-        raise DailyError("V3_PERIOD_INVALID", f"{period_path.name}의 시작일을 읽을 수 없다({type(error).__name__})") from error
+        raise DailyError(code, f"{period_path.name}의 시작일을 읽을 수 없다({type(error).__name__})") from error
     if not is_trading_day(start, holidays):
-        raise DailyError("V3_PERIOD_INVALID", f"시작일 {start}이 주말이거나 휴장일이다")
+        raise DailyError(code, f"시작일 {start}이 주말이거나 휴장일이다")
     days = []
     while len(days) < PERIOD_DAYS:
         if is_trading_day(day.isoformat(), holidays):
@@ -92,8 +92,17 @@ def settled_days(paper: Path) -> list[str]:
         return [row[0] for row in db.execute("SELECT date FROM settled_days ORDER BY date")]
 
 
-def settle(paths: Paths, period: Period, today: str, now: datetime) -> list[str]:
-    """기간의 거래일 중 today 전이고 정산하지 않은 날을 오래된 날부터 정산한다. 출력할 문제 줄을 돌려준다."""
+def mark_missing(paper: Path, day: str) -> None:
+    """정산 3단계: 그날 판단 행이 없으면 missing·cash 행을 넣는다."""
+    if not any(row["date"] == day for row in v3_head.read(paper)):
+        v3_head.insert(paper, dict.fromkeys(v3_head.COLUMNS, "") | {"date": day, "status": "missing", "subordinate": "cash", "attempts": 0})
+
+
+def settle(paths: Paths, period: Period, today: str, now: datetime, missing: Callable[[Path, str], None] = mark_missing) -> list[str]:
+    """기간의 거래일 중 today 전이고 정산하지 않은 날을 오래된 날부터 정산한다. 출력할 문제 줄을 돌려준다.
+
+    missing은 정산 3단계(판단하지 않은 것을 missing으로 기록)다. v4는 판단 차례마다 기록하는 함수를 넘긴다.
+    """
     done = set(settled_days(paths.paper))
     pending = [day for day in period.days if day < today and day not in done]
     if not pending:
@@ -105,7 +114,7 @@ def settle(paths: Paths, period: Period, today: str, now: datetime) -> list[str]
         if not all(violation.date for violation in violations):
             return problems
         limit = min(violation.date for violation in violations)
-    source_days = _data_days(paths.source)
+    source_days = data_days(paths.source)
     after = [day for day in source_days if day >= period.start]
     expected = [day for day in calendar(source_days, period) if period.start <= day <= (after[-1] if after else "")]
     if after != expected:
@@ -120,8 +129,7 @@ def settle(paths: Paths, period: Period, today: str, now: datetime) -> list[str]
         if violations:
             problems.append(market_data.describe(violations))
             break
-        if not any(row["date"] == day for row in v3_head.read(paths.paper)):
-            v3_head.insert(paths.paper, dict.fromkeys(v3_head.COLUMNS, "") | {"date": day, "status": "missing", "subordinate": "cash", "attempts": 0})
+        missing(paths.paper, day)
         with closing(sqlite3.connect(paths.paper)) as db, db:
             db.execute(f"CREATE TABLE IF NOT EXISTS settled_days ({SETTLED})")
             db.execute("INSERT INTO settled_days VALUES (?, ?)", (day, now.isoformat(timespec="seconds")))
@@ -227,7 +235,7 @@ def run(
         print("\n".join(problems))
         failures.append("V3_SETTLEMENT_STOPPED")
     settled = settled_days(paths.paper)
-    source_days = _data_days(paths.source)
+    source_days = data_days(paths.source)
     lines = [f"시세: {source_days[0]} ~ {source_days[-1]} {len(source_days)}거래일" if source_days else "시세: 없음"]
     lines.append(f"정산: {', '.join(day for day in settled if day not in before) or '없음'} (마친 마지막 날 {settled[-1] if settled else '없음'})")
     if today < period.start:
@@ -262,7 +270,7 @@ def settled_data(paths: Paths, settled: list[str]) -> market_data.MarketData:
     return data._replace(days=[day for day in data.days if day <= settled[-1]])
 
 
-def _data_days(path: Path) -> list[str]:
+def data_days(path: Path) -> list[str]:
     """시세 DB의 KODEX 200 거래일. 파일이 없으면 빈 목록이다."""
     if not path.exists():
         return []

@@ -36,42 +36,17 @@ class HeadError(Exception):
 
 
 def build_input(day: str, month_days: list[str], market_path: Path, us_path: Path, accounts: dict, decisions: list[dict]) -> dict:
-    """판단일 day의 헤드 입력. 시세는 day 전의 일봉 수정 종가로만 계산하고, 가격 자체는 넣지 않는다.
+    """판단일 day의 헤드 입력. 시세 항목은 market_input으로 만든다.
 
     month_days는 day가 속한 달의 거래일, us_path는 미국 네 종목 일봉 파일, accounts는 PRD 03이 정산 결과로 만든 계좌 요약이다.
       {"subordinates": {id: {"recent_returns_pct", "holding"}}, "head_account": {...}, "rule_head": {...},
        "head_returns": {날짜: 그날 헤드 계좌 수익률(%)}, "settled_through": 날짜 또는 None}
     decisions는 decisions 표의 행이다.
     """
-    with closing(sqlite3.connect(market_path)) as db:
-        rows = db.execute("SELECT symbol, date, adj_close FROM candles_1d WHERE date < ? ORDER BY symbol, date", (day,)).fetchall()
-    closes = {KODEX200: [], INVERSE: []}
-    for symbol, date, adj_close in rows:
-        if symbol in closes:
-            closes[symbol].append((date, Decimal(adj_close)))
-    prices = [price for _, price in closes[KODEX200]]
-    returns = _daily_returns(prices)
-    mean = sum(returns) / len(returns)
-    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-    session = sessions.session(day, sessions.exceptions())
-    index = month_days.index(day)
     earlier = [row for row in decisions if row["date"] < day]
     return {
         "decision_date": day,
-        "session": {"open": session.open, "close": session.close, "note": _note(day)},
-        "month_position": {"from_start": index + 1, "from_end": len(month_days) - index},
-        "data_through": closes[KODEX200][-1][0],
-        "market": {
-            "kodex200": {
-                "daily_returns_pct": [pct(r) for r in returns],
-                "returns_pct": {f"{k}d": pct(prices[-1] / prices[-1 - k] - 1) for k in (1, 5, 20, 60)},
-                "vs_average_pct": {f"{k}d": pct(prices[-1] / (sum(prices[-k:]) / k) - 1) for k in (5, 20, 60, 200)},
-                "volatility_20d_pct": pct(variance.sqrt() * Decimal(252).sqrt()),
-                "drawdown_60d_pct": pct(prices[-1] / max(prices[-60:]) - 1),
-            },
-            "inverse": {"daily_returns_pct": [pct(r) for r in _daily_returns([price for _, price in closes[INVERSE]])]},
-        },
-        "us_market": _us_market(us_path, day),
+        **market_input(day, month_days, market_path, us_path),
         "subordinates": [
             {
                 "id": row["id"],
@@ -99,8 +74,46 @@ def build_input(day: str, month_days: list[str], market_path: Path, us_path: Pat
     }
 
 
-def parse(text: str) -> dict:
-    """응답 텍스트를 검증해 {"subordinate", "reason", "notes"}를 돌려준다. 어기면 V3_HEAD_RESPONSE_INVALID."""
+def market_input(day: str, month_days: list[str], market_path: Path, us_path: Path) -> dict:
+    """헤드 입력의 session, month_position, data_through, market, us_market. v4 헤드도 쓴다.
+
+    시세는 day 전의 일봉 수정 종가로만 계산하고, 가격 자체는 넣지 않는다.
+    """
+    with closing(sqlite3.connect(market_path)) as db:
+        rows = db.execute("SELECT symbol, date, adj_close FROM candles_1d WHERE date < ? ORDER BY symbol, date", (day,)).fetchall()
+    closes = {KODEX200: [], INVERSE: []}
+    for symbol, date, adj_close in rows:
+        if symbol in closes:
+            closes[symbol].append((date, Decimal(adj_close)))
+    prices = [price for _, price in closes[KODEX200]]
+    returns = _daily_returns(prices)
+    mean = sum(returns) / len(returns)
+    variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
+    session = sessions.session(day, sessions.exceptions())
+    index = month_days.index(day)
+    return {
+        "session": {"open": session.open, "close": session.close, "note": _note(day)},
+        "month_position": {"from_start": index + 1, "from_end": len(month_days) - index},
+        "data_through": closes[KODEX200][-1][0],
+        "market": {
+            "kodex200": {
+                "daily_returns_pct": [pct(r) for r in returns],
+                "returns_pct": {f"{k}d": pct(prices[-1] / prices[-1 - k] - 1) for k in (1, 5, 20, 60)},
+                "vs_average_pct": {f"{k}d": pct(prices[-1] / (sum(prices[-k:]) / k) - 1) for k in (5, 20, 60, 200)},
+                "volatility_20d_pct": pct(variance.sqrt() * Decimal(252).sqrt()),
+                "drawdown_60d_pct": pct(prices[-1] / max(prices[-60:]) - 1),
+            },
+            "inverse": {"daily_returns_pct": [pct(r) for r in _daily_returns([price for _, price in closes[INVERSE]])]},
+        },
+        "us_market": _us_market(us_path, day),
+    }
+
+
+def parse(text: str, ids: list[str] = IDS) -> dict:
+    """응답 텍스트를 검증해 {"subordinate", "reason", "notes"}를 돌려준다. 어기면 V3_HEAD_RESPONSE_INVALID.
+
+    ids는 고를 수 있는 부하 id다. v4 헤드는 v4 부하 설명 표의 id를 넘긴다.
+    """
     text = text.strip()
     if fenced := FENCE.fullmatch(text):
         text = fenced.group(1)
@@ -112,7 +125,7 @@ def parse(text: str) -> dict:
         raise HeadError("V3_HEAD_RESPONSE_INVALID", "키가 subordinate, reason, notes 셋이 아니다")
     if not all(isinstance(item, str) for item in value.values()):
         raise HeadError("V3_HEAD_RESPONSE_INVALID", "값이 모두 문자열이 아니다")
-    if value["subordinate"] not in IDS:
+    if value["subordinate"] not in ids:
         raise HeadError("V3_HEAD_RESPONSE_INVALID", f"목록에 없는 부하 {value['subordinate']!r}")
     if len(value["reason"]) > REASON_LIMIT or len(value["notes"]) > NOTES_LIMIT:
         raise HeadError("V3_HEAD_RESPONSE_INVALID", f"reason {len(value['reason'])}자, notes {len(value['notes'])}자로 길이를 넘는다")

@@ -1,0 +1,170 @@
+{
+  "credentials": {"NAVER_CLIENT_ID": "fake-naver-id-7f3a", "NAVER_CLIENT_SECRET": "fake-naver-secret-9c1e"},
+  "url": "https://naverapihub.apigw.ntruss.com/search/v1/news",
+  "params": {"display": "10", "start": "1", "sort": "date", "format": "json"},
+  "headers": {"X-NCP-APIGW-API-KEY-ID": "fake-naver-id-7f3a", "X-NCP-APIGW-API-KEY": "fake-naver-secret-9c1e"},
+  "cases": {
+    "select": {
+      "cutoff": "2026-11-02T11:00:00",
+      "deadline": "2026-11-02T11:02:00",
+      "start": "2026-11-02T11:01:20",
+      "credentials": true,
+      "responses": {
+        "코스피": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:20 +0900", "total": 52310, "start": 1, "display": 5, "items": [
+          {"title": "<b>코스피</b> 상승폭 확대", "originallink": "https://www.edaily.co.kr/News/Read?newsId=1101", "link": "https://n.news.naver.com/mnews/article/018/0000001101", "description": "<b>코스피</b>가 상승폭을 키웠다.", "pubDate": "Mon, 02 Nov 2026 11:01:00 +0900"},
+          {"title": "<b>코스피</b> 11시 현재 1% 상승", "originallink": "https://www.newsis.com/view/NISX20261102_1100", "link": "https://n.news.naver.com/mnews/article/003/0000001100", "description": "<b>코스피</b>가 11시 현재 1% 올랐다.", "pubDate": "Mon, 02 Nov 2026 11:00:00 +0900"},
+          {"title": "<b>코스피</b> &quot;반등&quot; 기대 &amp; 외국인 &lt;b&gt;순매수&lt;/b&gt;", "originallink": "https://www.news1.kr/finance/1058", "link": "https://n.news.naver.com/mnews/article/421/0000001058", "description": "<b>코스피</b>가 오전 장에서 &quot;반등&quot; 흐름을 보였다.", "pubDate": "Mon, 02 Nov 2026 10:58:00 +0900"},
+          {"title": "<b>코스피</b>·뉴욕증시 동반 상승", "originallink": "https://www.yna.co.kr/view/AKR20261102001045", "link": "https://n.news.naver.com/mnews/article/001/0000001045", "description": "<b>코스피</b>와 뉴욕증시가 함께 올랐다.", "pubDate": "Mon, 02 Nov 2026 10:45:00 +0900"},
+          {"title": "<b>코스피</b> 장 초반 보합", "originallink": "", "link": "https://n.news.naver.com/mnews/article/015/0000001020", "description": "<b>코스피</b>가 장 초반 보합세다.", "pubDate": "Mon, 02 Nov 2026 10:20:00 +0900"}
+        ]}},
+        "뉴욕증시": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:21 +0900", "total": 18200, "start": 1, "display": 3, "items": [
+          {"title": "<b>뉴욕증시</b>, 기술주 강세에 상승 마감", "originallink": "https://www.hankyung.com/article/2026110201501", "link": "https://n.news.naver.com/mnews/article/015/0000000150", "description": "<b>뉴욕증시</b>에서 나스닥이 1.2% 올랐다.", "pubDate": "Mon, 02 Nov 2026 01:50:00 +0000"},
+          {"title": "코스피·<b>뉴욕증시</b> 동반 상승", "originallink": "https://www.yna.co.kr/view/AKR20261102001045", "link": "https://n.news.naver.com/mnews/article/001/0000001045", "description": "코스피와 <b>뉴욕증시</b>가 함께 올랐다.", "pubDate": "Mon, 02 Nov 2026 10:45:00 +0900"},
+          {"title": "<b>뉴욕증시</b> 3대 지수 상승", "originallink": "https://www.mk.co.kr/news/stock/0610", "link": "https://n.news.naver.com/mnews/article/009/0000000610", "description": "다우·S&amp;P500·나스닥이 모두 올랐다.", "pubDate": "Mon, 02 Nov 2026 06:10:00 +0900"}
+        ]}},
+        "환율": {"seconds": 1, "status": 500, "body": {"error": {"errorCode": "500", "message": "Internal Server Error"}}},
+        "반도체": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:23 +0900", "total": 30400, "start": 1, "display": 2, "items": [
+          {"title": "<b>반도체</b> 수출 증가", "originallink": "https://www.etnews.com/20261102001055", "link": "https://n.news.naver.com/mnews/article/030/0000001055", "description": "<b>반도체</b> 수출이 늘었다.", "pubDate": "Mon, 02 Nov 2026 10:55:00 +0900"},
+          {"title": "<b>반도체</b> 업황 점검", "originallink": "https://www.etnews.com/20261102001040", "link": "https://n.news.naver.com/mnews/article/030/0000001040", "description": "<b>반도체</b> 업황을 점검했다."}
+        ]}}
+      },
+      "requests": ["코스피", "뉴욕증시", "환율", "반도체"],
+      "news": [
+        {"published_at": "2026-11-02T10:58:00+09:00", "source": "www.news1.kr", "title": "코스피 \"반등\" 기대 & 외국인 <b>순매수</b>", "summary": "코스피가 오전 장에서 \"반등\" 흐름을 보였다."},
+        {"published_at": "2026-11-02T10:50:00+09:00", "source": "www.hankyung.com", "title": "뉴욕증시, 기술주 강세에 상승 마감", "summary": "뉴욕증시에서 나스닥이 1.2% 올랐다."},
+        {"published_at": "2026-11-02T10:45:00+09:00", "source": "www.yna.co.kr", "title": "코스피·뉴욕증시 동반 상승", "summary": "코스피와 뉴욕증시가 함께 올랐다."},
+        {"published_at": "2026-11-02T10:20:00+09:00", "source": "n.news.naver.com", "title": "코스피 장 초반 보합", "summary": "코스피가 장 초반 보합세다."},
+        {"published_at": "2026-11-02T06:10:00+09:00", "source": "www.mk.co.kr", "title": "뉴욕증시 3대 지수 상승", "summary": "다우·S&P500·나스닥이 모두 올랐다."}
+      ]
+    },
+    "limit": {
+      "cutoff": "2026-11-02T11:00:00",
+      "deadline": "2026-11-02T11:02:00",
+      "start": "2026-11-02T11:01:20",
+      "credentials": true,
+      "responses": {
+        "코스피": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:20 +0900", "total": 9, "start": 1, "display": 9, "items": [
+          {"title": "기사 10:32", "originallink": "https://www.example.com/1032", "link": "https://n.news.naver.com/1032", "description": "요약 10:32", "pubDate": "Mon, 02 Nov 2026 10:32:00 +0900"},
+          {"title": "기사 10:28", "originallink": "https://www.example.com/1028", "link": "https://n.news.naver.com/1028", "description": "요약 10:28", "pubDate": "Mon, 02 Nov 2026 10:28:00 +0900"},
+          {"title": "기사 10:24", "originallink": "https://www.example.com/1024", "link": "https://n.news.naver.com/1024", "description": "요약 10:24", "pubDate": "Mon, 02 Nov 2026 10:24:00 +0900"},
+          {"title": "기사 10:20", "originallink": "https://www.example.com/1020", "link": "https://n.news.naver.com/1020", "description": "요약 10:20", "pubDate": "Mon, 02 Nov 2026 10:20:00 +0900"},
+          {"title": "기사 10:16", "originallink": "https://www.example.com/1016", "link": "https://n.news.naver.com/1016", "description": "요약 10:16", "pubDate": "Mon, 02 Nov 2026 10:16:00 +0900"},
+          {"title": "기사 10:12", "originallink": "https://www.example.com/1012", "link": "https://n.news.naver.com/1012", "description": "요약 10:12", "pubDate": "Mon, 02 Nov 2026 10:12:00 +0900"},
+          {"title": "기사 10:08", "originallink": "https://www.example.com/1008", "link": "https://n.news.naver.com/1008", "description": "요약 10:08", "pubDate": "Mon, 02 Nov 2026 10:08:00 +0900"},
+          {"title": "기사 10:04", "originallink": "https://www.example.com/1004", "link": "https://n.news.naver.com/1004", "description": "요약 10:04", "pubDate": "Mon, 02 Nov 2026 10:04:00 +0900"},
+          {"title": "기사 10:00", "originallink": "https://www.example.com/1000", "link": "https://n.news.naver.com/1000", "description": "요약 10:00", "pubDate": "Mon, 02 Nov 2026 10:00:00 +0900"}
+        ]}},
+        "뉴욕증시": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:21 +0900", "total": 9, "start": 1, "display": 9, "items": [
+          {"title": "기사 10:33", "originallink": "https://www.example.com/1033", "link": "https://n.news.naver.com/1033", "description": "요약 10:33", "pubDate": "Mon, 02 Nov 2026 10:33:00 +0900"},
+          {"title": "기사 10:29", "originallink": "https://www.example.com/1029", "link": "https://n.news.naver.com/1029", "description": "요약 10:29", "pubDate": "Mon, 02 Nov 2026 10:29:00 +0900"},
+          {"title": "기사 10:25", "originallink": "https://www.example.com/1025", "link": "https://n.news.naver.com/1025", "description": "요약 10:25", "pubDate": "Mon, 02 Nov 2026 10:25:00 +0900"},
+          {"title": "기사 10:21", "originallink": "https://www.example.com/1021", "link": "https://n.news.naver.com/1021", "description": "요약 10:21", "pubDate": "Mon, 02 Nov 2026 10:21:00 +0900"},
+          {"title": "기사 10:17", "originallink": "https://www.example.com/1017", "link": "https://n.news.naver.com/1017", "description": "요약 10:17", "pubDate": "Mon, 02 Nov 2026 10:17:00 +0900"},
+          {"title": "기사 10:13", "originallink": "https://www.example.com/1013", "link": "https://n.news.naver.com/1013", "description": "요약 10:13", "pubDate": "Mon, 02 Nov 2026 10:13:00 +0900"},
+          {"title": "기사 10:09", "originallink": "https://www.example.com/1009", "link": "https://n.news.naver.com/1009", "description": "요약 10:09", "pubDate": "Mon, 02 Nov 2026 10:09:00 +0900"},
+          {"title": "기사 10:05", "originallink": "https://www.example.com/1005", "link": "https://n.news.naver.com/1005", "description": "요약 10:05", "pubDate": "Mon, 02 Nov 2026 10:05:00 +0900"},
+          {"title": "기사 10:01", "originallink": "https://www.example.com/1001", "link": "https://n.news.naver.com/1001", "description": "요약 10:01", "pubDate": "Mon, 02 Nov 2026 10:01:00 +0900"}
+        ]}},
+        "환율": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:22 +0900", "total": 9, "start": 1, "display": 9, "items": [
+          {"title": "기사 10:34", "originallink": "https://www.example.com/1034", "link": "https://n.news.naver.com/1034", "description": "요약 10:34", "pubDate": "Mon, 02 Nov 2026 10:34:00 +0900"},
+          {"title": "기사 10:30", "originallink": "https://www.example.com/1030", "link": "https://n.news.naver.com/1030", "description": "요약 10:30", "pubDate": "Mon, 02 Nov 2026 10:30:00 +0900"},
+          {"title": "기사 10:26", "originallink": "https://www.example.com/1026", "link": "https://n.news.naver.com/1026", "description": "요약 10:26", "pubDate": "Mon, 02 Nov 2026 10:26:00 +0900"},
+          {"title": "기사 10:22", "originallink": "https://www.example.com/1022", "link": "https://n.news.naver.com/1022", "description": "요약 10:22", "pubDate": "Mon, 02 Nov 2026 10:22:00 +0900"},
+          {"title": "기사 10:18", "originallink": "https://www.example.com/1018", "link": "https://n.news.naver.com/1018", "description": "요약 10:18", "pubDate": "Mon, 02 Nov 2026 10:18:00 +0900"},
+          {"title": "기사 10:14", "originallink": "https://www.example.com/1014", "link": "https://n.news.naver.com/1014", "description": "요약 10:14", "pubDate": "Mon, 02 Nov 2026 10:14:00 +0900"},
+          {"title": "기사 10:10", "originallink": "https://www.example.com/1010", "link": "https://n.news.naver.com/1010", "description": "요약 10:10", "pubDate": "Mon, 02 Nov 2026 10:10:00 +0900"},
+          {"title": "기사 10:06", "originallink": "https://www.example.com/1006", "link": "https://n.news.naver.com/1006", "description": "요약 10:06", "pubDate": "Mon, 02 Nov 2026 10:06:00 +0900"},
+          {"title": "기사 10:02", "originallink": "https://www.example.com/1002", "link": "https://n.news.naver.com/1002", "description": "요약 10:02", "pubDate": "Mon, 02 Nov 2026 10:02:00 +0900"}
+        ]}},
+        "반도체": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:23 +0900", "total": 8, "start": 1, "display": 8, "items": [
+          {"title": "기사 10:31", "originallink": "https://www.example.com/1031", "link": "https://n.news.naver.com/1031", "description": "요약 10:31", "pubDate": "Mon, 02 Nov 2026 10:31:00 +0900"},
+          {"title": "기사 10:27", "originallink": "https://www.example.com/1027", "link": "https://n.news.naver.com/1027", "description": "요약 10:27", "pubDate": "Mon, 02 Nov 2026 10:27:00 +0900"},
+          {"title": "기사 10:23", "originallink": "https://www.example.com/1023", "link": "https://n.news.naver.com/1023", "description": "요약 10:23", "pubDate": "Mon, 02 Nov 2026 10:23:00 +0900"},
+          {"title": "기사 10:19", "originallink": "https://www.example.com/1019", "link": "https://n.news.naver.com/1019", "description": "요약 10:19", "pubDate": "Mon, 02 Nov 2026 10:19:00 +0900"},
+          {"title": "기사 10:15", "originallink": "https://www.example.com/1015", "link": "https://n.news.naver.com/1015", "description": "요약 10:15", "pubDate": "Mon, 02 Nov 2026 10:15:00 +0900"},
+          {"title": "기사 10:11", "originallink": "https://www.example.com/1011", "link": "https://n.news.naver.com/1011", "description": "요약 10:11", "pubDate": "Mon, 02 Nov 2026 10:11:00 +0900"},
+          {"title": "기사 10:07", "originallink": "https://www.example.com/1007", "link": "https://n.news.naver.com/1007", "description": "요약 10:07", "pubDate": "Mon, 02 Nov 2026 10:07:00 +0900"},
+          {"title": "기사 10:03", "originallink": "https://www.example.com/1003", "link": "https://n.news.naver.com/1003", "description": "요약 10:03", "pubDate": "Mon, 02 Nov 2026 10:03:00 +0900"}
+        ]}}
+      },
+      "requests": ["코스피", "뉴욕증시", "환율", "반도체"],
+      "news": [
+        {"published_at": "2026-11-02T10:34:00+09:00", "source": "www.example.com", "title": "기사 10:34", "summary": "요약 10:34"},
+        {"published_at": "2026-11-02T10:33:00+09:00", "source": "www.example.com", "title": "기사 10:33", "summary": "요약 10:33"},
+        {"published_at": "2026-11-02T10:32:00+09:00", "source": "www.example.com", "title": "기사 10:32", "summary": "요약 10:32"},
+        {"published_at": "2026-11-02T10:31:00+09:00", "source": "www.example.com", "title": "기사 10:31", "summary": "요약 10:31"},
+        {"published_at": "2026-11-02T10:30:00+09:00", "source": "www.example.com", "title": "기사 10:30", "summary": "요약 10:30"},
+        {"published_at": "2026-11-02T10:29:00+09:00", "source": "www.example.com", "title": "기사 10:29", "summary": "요약 10:29"},
+        {"published_at": "2026-11-02T10:28:00+09:00", "source": "www.example.com", "title": "기사 10:28", "summary": "요약 10:28"},
+        {"published_at": "2026-11-02T10:27:00+09:00", "source": "www.example.com", "title": "기사 10:27", "summary": "요약 10:27"},
+        {"published_at": "2026-11-02T10:26:00+09:00", "source": "www.example.com", "title": "기사 10:26", "summary": "요약 10:26"},
+        {"published_at": "2026-11-02T10:25:00+09:00", "source": "www.example.com", "title": "기사 10:25", "summary": "요약 10:25"},
+        {"published_at": "2026-11-02T10:24:00+09:00", "source": "www.example.com", "title": "기사 10:24", "summary": "요약 10:24"},
+        {"published_at": "2026-11-02T10:23:00+09:00", "source": "www.example.com", "title": "기사 10:23", "summary": "요약 10:23"},
+        {"published_at": "2026-11-02T10:22:00+09:00", "source": "www.example.com", "title": "기사 10:22", "summary": "요약 10:22"},
+        {"published_at": "2026-11-02T10:21:00+09:00", "source": "www.example.com", "title": "기사 10:21", "summary": "요약 10:21"},
+        {"published_at": "2026-11-02T10:20:00+09:00", "source": "www.example.com", "title": "기사 10:20", "summary": "요약 10:20"},
+        {"published_at": "2026-11-02T10:19:00+09:00", "source": "www.example.com", "title": "기사 10:19", "summary": "요약 10:19"},
+        {"published_at": "2026-11-02T10:18:00+09:00", "source": "www.example.com", "title": "기사 10:18", "summary": "요약 10:18"},
+        {"published_at": "2026-11-02T10:17:00+09:00", "source": "www.example.com", "title": "기사 10:17", "summary": "요약 10:17"},
+        {"published_at": "2026-11-02T10:16:00+09:00", "source": "www.example.com", "title": "기사 10:16", "summary": "요약 10:16"},
+        {"published_at": "2026-11-02T10:15:00+09:00", "source": "www.example.com", "title": "기사 10:15", "summary": "요약 10:15"},
+        {"published_at": "2026-11-02T10:14:00+09:00", "source": "www.example.com", "title": "기사 10:14", "summary": "요약 10:14"},
+        {"published_at": "2026-11-02T10:13:00+09:00", "source": "www.example.com", "title": "기사 10:13", "summary": "요약 10:13"},
+        {"published_at": "2026-11-02T10:12:00+09:00", "source": "www.example.com", "title": "기사 10:12", "summary": "요약 10:12"},
+        {"published_at": "2026-11-02T10:11:00+09:00", "source": "www.example.com", "title": "기사 10:11", "summary": "요약 10:11"},
+        {"published_at": "2026-11-02T10:10:00+09:00", "source": "www.example.com", "title": "기사 10:10", "summary": "요약 10:10"},
+        {"published_at": "2026-11-02T10:09:00+09:00", "source": "www.example.com", "title": "기사 10:09", "summary": "요약 10:09"},
+        {"published_at": "2026-11-02T10:08:00+09:00", "source": "www.example.com", "title": "기사 10:08", "summary": "요약 10:08"},
+        {"published_at": "2026-11-02T10:07:00+09:00", "source": "www.example.com", "title": "기사 10:07", "summary": "요약 10:07"},
+        {"published_at": "2026-11-02T10:06:00+09:00", "source": "www.example.com", "title": "기사 10:06", "summary": "요약 10:06"},
+        {"published_at": "2026-11-02T10:05:00+09:00", "source": "www.example.com", "title": "기사 10:05", "summary": "요약 10:05"}
+      ]
+    },
+    "all_failed": {
+      "cutoff": "2026-11-02T11:00:00",
+      "deadline": "2026-11-02T11:02:00",
+      "start": "2026-11-02T11:01:20",
+      "credentials": true,
+      "responses": {
+        "코스피": {"seconds": 1, "error": "ConnectError"},
+        "뉴욕증시": {"seconds": 1, "error": "ConnectError"},
+        "환율": {"seconds": 1, "error": "ConnectError"},
+        "반도체": {"seconds": 1, "error": "ConnectError"}
+      },
+      "requests": ["코스피", "뉴욕증시", "환율", "반도체"],
+      "news": null
+    },
+    "no_credentials": {
+      "cutoff": "2026-11-02T11:00:00",
+      "deadline": "2026-11-02T11:02:00",
+      "start": "2026-11-02T11:01:20",
+      "credentials": false,
+      "responses": {},
+      "requests": [],
+      "news": null
+    },
+    "deadline": {
+      "cutoff": "2026-11-02T11:00:00",
+      "deadline": "2026-11-02T11:02:00",
+      "start": "2026-11-02T11:01:45",
+      "credentials": true,
+      "responses": {
+        "코스피": {"seconds": 5, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:01:45 +0900", "total": 52311, "start": 1, "display": 1, "items": [
+          {"title": "<b>코스피</b> 외국인 순매수", "originallink": "https://www.sedaily.com/NewsView/1059", "link": "https://n.news.naver.com/mnews/article/011/0000001059", "description": "외국인이 <b>코스피</b>에서 순매수했다.", "pubDate": "Mon, 02 Nov 2026 10:59:00 +0900"}
+        ]}},
+        "뉴욕증시": {"seconds": 10, "error": "ReadTimeout"},
+        "환율": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:02:00 +0900", "total": 9100, "start": 1, "display": 1, "items": [
+          {"title": "원/달러 <b>환율</b> 하락", "originallink": "https://www.fnnews.com/news/1057", "link": "https://n.news.naver.com/mnews/article/014/0000001057", "description": "원/달러 <b>환율</b>이 내렸다.", "pubDate": "Mon, 02 Nov 2026 10:57:00 +0900"}
+        ]}},
+        "반도체": {"seconds": 1, "status": 200, "body": {"lastBuildDate": "Mon, 02 Nov 2026 11:02:01 +0900", "total": 30401, "start": 1, "display": 1, "items": [
+          {"title": "<b>반도체</b> 장비주 강세", "originallink": "https://www.etnews.com/20261102001056", "link": "https://n.news.naver.com/mnews/article/030/0000001056", "description": "<b>반도체</b> 장비주가 올랐다.", "pubDate": "Mon, 02 Nov 2026 10:56:00 +0900"}
+        ]}}
+      },
+      "requests": ["코스피", "뉴욕증시"],
+      "news": [
+        {"published_at": "2026-11-02T10:59:00+09:00", "source": "www.sedaily.com", "title": "코스피 외국인 순매수", "summary": "외국인이 코스피에서 순매수했다."}
+      ]
+    }
+  }
+}

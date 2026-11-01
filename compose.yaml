@@ -14,3 +14,20 @@ services:
         bind:
           create_host_path: false
       - ~/.trading-oracle/auth:/root/.trading-oracle/auth
+  v4:
+    build: .
+    profiles: ["v4"]  # 이름을 지정해야만 켜진다. 맥북에서 v3와 함께 켜지면 같은 토스 키를 두 곳에서 쓰게 된다
+    init: true
+    restart: unless-stopped
+    command: ["rt-trading", "v4-serve", "--host", "0.0.0.0"]
+    ports:
+      - 127.0.0.1:8081:8081
+    volumes:
+      - ./data:/app/data
+      - type: bind
+        source: ./.env
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
+      - ~/.trading-oracle/auth:/root/.trading-oracle/auth

@@ -27,6 +27,11 @@ from rt_trading import (
     v3_report,
     v3_serve,
     v3_us,
+    v4_acceptance,
+    v4_daily,
+    v4_news,
+    v4_report,
+    v4_serve,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +39,10 @@ DB_PATH = ROOT / "data" / "market.sqlite3"
 REPORT_DIR = ROOT / "data" / "reports"
 V3_DIR = ROOT / "data" / "v3"
 V3_PATHS = v3_daily.Paths(DB_PATH, V3_DIR / "market.sqlite3", V3_DIR / "paper.sqlite3", V3_DIR / "head", ROOT / "data" / "us.sqlite3")
+V4_DIR = ROOT / "data" / "v4"
+V4_PATHS = v4_daily.Paths(
+    DB_PATH, V4_DIR / "market.sqlite3", V4_DIR / "paper.sqlite3", V4_DIR / "head", V4_DIR / "news", ROOT / "data" / "us.sqlite3"
+)
 SYMBOLS = ("069500", "114800")
 SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
 
@@ -59,6 +68,14 @@ def main() -> None:
     v3_checks.add_argument("--prd", choices=sorted(v3_acceptance.CASES))
     serve = commands.add_parser("v3-serve", help="평일 07:30·08:20 자동 실행과 보기 전용 현황 웹페이지(Docker 컨테이너에서 쓴다)")
     serve.add_argument("--host", default="127.0.0.1")
+    commands.add_parser("v4-daily", help="v4 아침 실행: 시세를 받아 밀린 날을 정산하고 오늘 개장 전 판단을 한다")
+    v4_decide = commands.add_parser("v4-decide", help="v4 장중·마감 전 판단 한 번: 당일 1분봉과 뉴스를 받아 판단한다")
+    v4_decide.add_argument("--at", required=True, help="판단 차례 HH:MM")
+    commands.add_parser("v4-report", help="v4 모의 운용 보고서와, 기간이 끝났으면 판정을 만든다")
+    v4_serve_args = commands.add_parser("v4-serve", help="아침 실행·판단 차례마다 자동 실행과 보기 전용 현황 웹페이지(서버의 Docker 컨테이너에서 쓴다)")
+    v4_serve_args.add_argument("--host", default="127.0.0.1")
+    v4_checks = commands.add_parser("v4-acceptance", help="v4 acceptance를 네트워크 없이 실행한다")
+    v4_checks.add_argument("--prd", choices=sorted(v4_acceptance.CASES))
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -80,6 +97,16 @@ def main() -> None:
         sys.exit(v3_acceptance.run(args.prd))
     if args.command == "v3-serve":
         sys.exit(v3_serve.run(V3_PATHS, v3_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, V3_DIR / "daily.log", args.host, v3_serve.PORT))
+    if args.command == "v4-daily":
+        sys.exit(run_v4_daily())
+    if args.command == "v4-decide":
+        sys.exit(run_v4_decide(args.at))
+    if args.command == "v4-report":
+        sys.exit(v4_report.run(V4_PATHS, v4_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, lambda: datetime.now(toss.KST)))
+    if args.command == "v4-serve":
+        sys.exit(v4_serve.run(V4_PATHS, v4_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, V4_DIR / "run.log", args.host, v4_serve.PORT))
+    if args.command == "v4-acceptance":
+        sys.exit(v4_acceptance.run(args.prd))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
 
 
@@ -93,25 +120,26 @@ def fetch_us() -> int:
         return v3_us.run(http, toss.read_credentials(ROOT), V3_PATHS.us, lambda: datetime.now(toss.KST))
 
 
+def fetch_market(seconds: float) -> int:
+    """v3-daily·v4-daily의 시세 받기. v3-us-fetch와 v1 fetch 명령을 seconds초 안에서 차례로 따로 실행한다."""
+    try:
+        toss.read_credentials(ROOT)
+    except KeyError as error:
+        print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
+        return 1
+    deadline, codes = time.monotonic() + seconds, []
+    for command in ("v3-us-fetch", "fetch"):  # 미국 시세는 그날 판단에 쓰이고 몇 초면 끝나서 먼저 받는다
+        try:
+            codes.append(subprocess.run(["rt-trading", command], timeout=deadline - time.monotonic()).returncode)
+        except subprocess.TimeoutExpired:
+            print(f"V3_FETCH_TIMEOUT: 판단 마감 15분 전까지 시세를 다 받지 못해 멈췄다({command})")
+            return 1
+    return 0 if codes == [0, 0] else 1
+
+
 def run_v3_daily() -> int:
     """v3 매일 실행. 시세는 v3-us-fetch와 v1 fetch 명령을 따로 실행해 받고, Codex 토큰은 trading-oracle과 함께 쓴다."""
     clock = lambda: datetime.now(toss.KST)
-
-    def fetch_market(seconds: float) -> int:
-        try:
-            toss.read_credentials(ROOT)
-        except KeyError as error:
-            print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
-            return 1
-        deadline, codes = time.monotonic() + seconds, []
-        for command in ("v3-us-fetch", "fetch"):  # 미국 시세는 그날 판단에 쓰이고 몇 초면 끝나서 먼저 받는다
-            try:
-                codes.append(subprocess.run(["rt-trading", command], timeout=deadline - time.monotonic()).returncode)
-            except subprocess.TimeoutExpired:
-                print(f"V3_FETCH_TIMEOUT: 판단 마감 15분 전까지 시세를 다 받지 못해 멈췄다({command})")
-                return 1
-        return 0 if codes == [0, 0] else 1
-
     with httpx.Client() as codex_http:
         return v3_daily.run(
             V3_PATHS,
@@ -122,6 +150,27 @@ def run_v3_daily() -> int:
             lambda: codex.credentials(codex.TOKEN_DIR),
             clock,
             time.sleep,
+        )
+
+
+def run_v4_daily() -> int:
+    """v4 아침 실행. 시세 받기는 v3와 같고, 뉴스는 NAVER API HUB에서 받는다."""
+    clock = lambda: datetime.now(toss.KST)
+    with httpx.Client() as http:
+        news = lambda cutoff, deadline, path: v4_news.fetch(http, v4_news.read_credentials(ROOT), cutoff, deadline, clock, path)
+        return v4_daily.run(
+            V4_PATHS, v4_daily.PERIOD, v3_daily.HOLIDAYS, fetch_market, news, http, lambda: codex.credentials(codex.TOKEN_DIR), clock, time.sleep
+        )
+
+
+def run_v4_decide(slot: str) -> int:
+    """v4 장중·마감 전 판단 한 번. 당일 1분봉은 토스에서, 뉴스는 NAVER API HUB에서 받는다."""
+    clock = lambda: datetime.now(toss.KST)
+    with httpx.Client() as http:
+        news = lambda cutoff, deadline, path: v4_news.fetch(http, v4_news.read_credentials(ROOT), cutoff, deadline, clock, path)
+        bars = lambda day, seconds: v4_daily.fetch_bars(ROOT, day, seconds)
+        return v4_daily.decide(
+            V4_PATHS, v4_daily.PERIOD, v3_daily.HOLIDAYS, slot, bars, news, http, lambda: codex.credentials(codex.TOKEN_DIR), clock, time.sleep
         )
 
 

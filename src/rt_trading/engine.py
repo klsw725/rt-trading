@@ -106,12 +106,14 @@ def run(
     final_day: str | None = None,
     overnight_on: Callable[[str], bool] | None = None,
     pre_open: Callable[[View], PreOpen | None] | None = None,
+    switch: Callable[[View], PreOpen | None] | None = None,
 ) -> Records:
     """start 거래일부터 마지막 거래일까지 분마다 PRD 03의 순서로 처리한다.
 
     overnight이면 v2 PRD 02의 며칠 보유 방식이다. 기본값으로 부르면 v1과 같다.
     v3 PRD 02의 선택 인자: calendar는 전략에 넘기는 달력, final_day는 마지막 거래일로 볼 날(데이터에 없으면 어느 날도 아니다),
     overnight_on은 날짜별 며칠 보유 방식, pre_open은 날마다 첫 봉 전에 부르는 개장 전 처리다. 주지 않으면 지금과 같다.
+    v4 PRD 03의 선택 인자: switch는 봉마다 손실 한도 확인 뒤 전략 전에 부르는 장중 교체다. 교체를 돌려준 봉에서는 전략을 부르지 않는다.
     """
     symbols = sorted(data.bars)  # 입력 순서와 관계없이 같은 결과를 낸다
     defects = set(data.defects)
@@ -152,24 +154,9 @@ def run(
                 plan = pre_open(
                     View(date, session.open, session, base, date in defects, empty, past, past_days, holding, pending, days, data.defects, adj_closes)
                 )
-                stamp = f"{date} {session.open}"
-                if plan and plan.cancel and buy:
-                    records.discarded.append(Discard(stamp, buy.kind, buy.symbol, "switch_head"))
-                    buy = None
-                if plan and plan.sell and holding:
-                    sell_reason = "switch_head"
-                if plan and plan.buy:
-                    selling = bool(plan.sell and holding)
-                    if holding and not selling:
-                        records.discarded.append(Discard(stamp, "buy", plan.buy, "pending"))
-                    elif final:
-                        records.discarded.append(Discard(stamp, "buy", plan.buy, "last_day"))
-                    elif cumulative_hit or weekly_hit:
-                        records.discarded.append(Discard(stamp, "buy", plan.buy, "entry_blocked"))
-                    elif buy:
-                        records.discarded.append(Discard(stamp, "buy", plan.buy, "pending"))
-                    else:
-                        buy = _Buy(plan.buy, "buy", "signal", after_sell=selling)
+                if plan:
+                    blocked = cumulative_hit or weekly_hit or daily_hit  # 개장 전에는 하루 한도가 아직 발동하지 않았다
+                    buy, sell_reason = _change(plan, f"{date} {session.open}", holding, buy, sell_reason, final, blocked, records.discarded)
             for time in times:
                 stamp, now, auction = f"{date} {time}", {symbol: bars[symbol].get(time) for symbol in symbols}, {}
                 for symbol, bar in now.items():
@@ -237,11 +224,16 @@ def run(
                         records.discarded.append(Discard(stamp, buy.kind, buy.symbol, "entry_blocked"))
                         buy = None
 
-                # 6. 전략
+                # 6. 전략. v4 장중 교체를 돌려준 봉에서는 교체만 하고 전략을 부르지 않는다
                 view = View(
                     date, time, session, base, date in defects, today, past, past_days, holding, bool(sell_reason or buy),
                     days, data.defects, adj_closes,
                 )
+                change = switch(view) if switch else None
+                if change:
+                    blocked = cumulative_hit or weekly_hit or daily_hit
+                    buy, sell_reason = _change(change, stamp, holding, buy, sell_reason, final, blocked, records.discarded)
+                    continue
                 order = strategy(view)
                 if order:
                     entry = order.kind != "sell"
@@ -265,6 +257,41 @@ def run(
         past_days.append(date)
         adj_closes.append(data.daily[KODEX200][date][1])
     return records
+
+
+def _change(
+    plan: PreOpen,
+    stamp: str,
+    holding: Holding | None,
+    buy: _Buy | None,
+    sell_reason: str | None,
+    final: bool,
+    blocked: bool,
+    discarded: list[Discard],
+) -> tuple[_Buy | None, str | None]:
+    """부하 교체(v3 개장 전 처리, v4 장중 교체)를 적용해 (대기 매수, 매도 사유)를 돌려준다. 버린 주문은 discarded에 더한다.
+
+    cancel은 대기 매수를 switch_head로 취소하고, sell은 보유의 매도 사유를 switch_head로 한다.
+    buy는 보유가 있는데 팔지 않으면 pending, 마지막 거래일이면 last_day, 한도가 진입을 막으면 entry_blocked, 대기 매수가 있으면 pending으로 버린다.
+    """
+    if plan.cancel and buy:
+        discarded.append(Discard(stamp, buy.kind, buy.symbol, "switch_head"))
+        buy = None
+    if plan.sell and holding:
+        sell_reason = "switch_head"
+    if plan.buy:
+        selling = bool(plan.sell and holding)
+        if holding and not selling:
+            discarded.append(Discard(stamp, "buy", plan.buy, "pending"))
+        elif final:
+            discarded.append(Discard(stamp, "buy", plan.buy, "last_day"))
+        elif blocked:
+            discarded.append(Discard(stamp, "buy", plan.buy, "entry_blocked"))
+        elif buy:
+            discarded.append(Discard(stamp, "buy", plan.buy, "pending"))
+        else:
+            buy = _Buy(plan.buy, "buy", "signal", after_sell=selling)
+    return buy, sell_reason
 
 
 def _fillable(bar: Bar | None) -> bool:
