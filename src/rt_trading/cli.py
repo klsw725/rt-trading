@@ -34,6 +34,7 @@ from rt_trading import (
     v4_serve,
     v5_live,
     v5_report,
+    v5_serve,
     v5_target,
     web_acceptance,
 )
@@ -101,6 +102,8 @@ def main() -> None:
     v5_resume.add_argument("--new-ledger", action="store_true")
     v5_check = commands.add_parser("v5-check", help="토스 계좌를 조회한다. --order면 사람이 지켜보는 실주문 점검을 한다")
     v5_check.add_argument("--order", action="store_true")
+    v5_serve_args = commands.add_parser("v5-serve", help="아침 실행·판단 차례 자동 실행, 실행기 돌보기와 보기 전용 현황 웹페이지(서버의 Docker 컨테이너에서 쓴다)")
+    v5_serve_args.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -146,6 +149,8 @@ def main() -> None:
         sys.exit(v5_live.stop(V5_LIVE, args.sell, lambda: datetime.now(toss.KST)))
     if args.command in ("v5-live", "v5-resume", "v5-check"):
         sys.exit(run_v5_live(args))
+    if args.command == "v5-serve":
+        sys.exit(v5_serve.run(V5_LIVE, REPORT_DIR, V5_DIR / "run.log", V5_DIR / "live.log", args.host, v5_serve.PORT))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
 
 

@@ -31,3 +31,20 @@ services:
         bind:
           create_host_path: false
       - ~/.trading-oracle/auth:/root/.trading-oracle/auth
+  v5:
+    build: .
+    profiles: ["v5"]  # 이름을 지정해야만 켜진다. v4와 같은 포트·토스 키를 쓰므로 v4를 멈춘 뒤에 켠다
+    init: true
+    restart: unless-stopped
+    command: ["rt-trading", "v5-serve", "--host", "0.0.0.0"]
+    ports:
+      - 127.0.0.1:8081:8081
+    volumes:
+      - ./data:/app/data
+      - type: bind
+        source: ./.env
+        target: /app/.env
+        read_only: true
+        bind:
+          create_host_path: false
+      - ~/.trading-oracle/auth:/root/.trading-oracle/auth

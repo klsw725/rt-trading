@@ -19,6 +19,7 @@ h1{font-size:22px;margin:0;letter-spacing:-.01em}
 .muted{color:var(--muted)}
 header .muted{font-size:13px}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+section+.cards{margin-top:14px}
 .card,section{background:var(--card);border:1px solid var(--line);border-radius:14px}
 .card{padding:14px 16px}
 .card h2{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 6px;letter-spacing:.02em}

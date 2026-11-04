@@ -1,6 +1,7 @@
 """v5 acceptance. PRD별 사례를 네트워크 없이 실행하고 결과를 JSON으로 출력한다."""
 
 import contextlib
+import csv
 import fcntl
 import functools
 import io
@@ -25,19 +26,24 @@ from rt_trading import (
     codex,
     engine,
     fixtures,
+    report,
     toss,
     toss_account,
     v3_daily,
     v3_paper,
+    v3_serve,
     v3_us,
     v4_acceptance,
     v4_daily,
     v4_head,
     v4_paper,
+    v4_serve,
     v5_book,
     v5_live,
     v5_report,
+    v5_serve,
     v5_target,
+    web_acceptance,
 )
 from rt_trading.toss import KST
 
@@ -1099,6 +1105,217 @@ def case_run_report() -> None:
     assert period.final_day not in json.dumps(content, ensure_ascii=False), ("엔진에 주는 기간 마지막 날이 보고서에 있음", period.final_day)
 
 
+# PRD 05 서버
+
+
+def _serve_paths(tmp: Path, start: str, holidays: list[list[str]]) -> v5_live.Paths:
+    (tmp / "v5_period.json").write_text(json.dumps({"start": start}), encoding="utf-8")
+    (tmp / "krx_holidays.csv").write_text("date,reason\n" + "".join(f"{day},{reason}\n" for day, reason in holidays), encoding="utf-8")
+    daily = v4_daily.Paths(tmp / "market.sqlite3", tmp / "v5" / "market.sqlite3", tmp / "v5" / "paper.sqlite3", tmp / "v5" / "head", tmp / "v5" / "news", tmp / "us.sqlite3")
+    return v5_live.Paths(daily, tmp / "v5" / "live.sqlite3", tmp / "v5" / "config.json", tmp / "v5" / "live.lock", tmp / "v5" / "order.lock", tmp / "v5_period.json", tmp / "krx_holidays.csv")
+
+
+def case_serve_schedule() -> None:
+    fixture = _fixture("prd05-serve.json")
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        for item in fixture["schedule"]:
+            paths, now = _serve_paths(tmp, item["start"], fixture["holidays"]), _time(item["now"])
+            period = v5_serve.period(paths, now)
+            assert v4_serve.due(now, period) == item["due"], (item["now"], v4_serve.due(now, period))
+            assert v4_serve.next_run(now, period) == _time(item["next"]), (item["now"], v4_serve.next_run(now, period))
+        paths, log_path = _serve_paths(tmp, fixture["tick_start"], fixture["holidays"]), tmp / "v5" / "run.log"
+        status, done, executed, clock = {"started_at": "", "running": None, "last": None}, None, [], _LiveClock(_time("2026-01-05T00:00:00"))
+
+        def execute(command: str, file: io.TextIOBase, seconds: float) -> int | None:
+            executed.append([command, seconds])
+            file.write(f"{command} 출력\n")
+            if fixture["tick_exits"][command] is None:  # 시간 초과로 정해 둔 명령은 받은 초를 다 쓴다
+                clock.now += timedelta(seconds=seconds)
+            return fixture["tick_exits"][command]
+
+        for item in fixture["ticks"]:
+            clock.now, before = _time(item["now"]), len(executed)
+            done = v4_serve.tick(done, status, log_path, v5_serve.period(paths, clock.now), clock, execute, "v5")
+            assert executed[before:] == item["runs"], (item["now"], executed[before:])
+            if "last" in item:
+                assert status["last"] == item["last"], (item["now"], status["last"])
+        assert log_path.read_text(encoding="utf-8") == fixture["tick_log"], log_path.read_text(encoding="utf-8")
+        assert status["last"] == fixture["tick_last"] and status["running"] is None, status
+
+
+class _FakeExecutor:
+    """정해 둔 시각에 끝나는 가짜 v5-live 프로세스. records_end면 끝날 때 그날 end 차례를 마쳤다는 days 기록을 남긴다."""
+
+    def __init__(self, clock: _LiveClock, live_db: Path, ends_at: str, code: int, records_end: bool) -> None:
+        self.clock, self.live_db, self.ends_at, self.code, self.records_end, self.exited = clock, live_db, _time(ends_at), code, records_end, False
+
+    def poll(self) -> int | None:
+        if self.clock() < self.ends_at:
+            return None
+        if self.records_end and not self.exited:
+            with v5_book.connect(self.live_db) as db:
+                db.execute("INSERT INTO days (date, mode, ended) VALUES (?, 'dry', 1)", (self.ends_at.date().isoformat(),))
+        self.exited = True
+        return self.code
+
+
+def _until(check: Callable[[], bool]) -> None:
+    """실행기 돌보기 스레드가 check를 참으로 만들 때까지 실제 시간으로 5초까지 기다린다."""
+    deadline = time.monotonic() + 5
+    while not check():
+        assert time.monotonic() < deadline, "실행기 돌보기 스레드가 5초 안에 따르지 않았다"
+        time.sleep(0.01)
+
+
+def case_serve_live() -> None:
+    fixture = _fixture("prd05-serve.json")
+    holidays, together = {day for day, _ in fixture["holidays"]}, fixture["together"]
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths = _serve_paths(tmp, together["start"], fixture["holidays"])
+        for day, (start, end) in fixture["live_hours"].items():
+            first = _time(f"{day}T{start}")
+            assert not v5_serve.live_wanted(first - timedelta(seconds=1), holidays, paths.live) and v5_serve.live_wanted(first, holidays, paths.live), day
+            assert v5_live.turns(day)[-1].at == _time(f"{day}T{end}"), day
+        for at in fixture["live_off"]:
+            assert not v5_serve.live_wanted(_time(at), holidays, paths.live), at
+        clock, state, launched = _LiveClock(_time(fixture["watch"]["steps"][0][0])), {"process": None, "exited": None}, []
+
+        def launch(specs: list[list]) -> _FakeExecutor:
+            launched.append(_FakeExecutor(clock, paths.live, *specs[len(launched)]))
+            return launched[-1]
+
+        for at, count in fixture["watch"]["steps"]:
+            clock.now = _time(at)
+            v5_serve.watch(state, clock.now, holidays, paths.live, lambda: launch(fixture["watch"]["launches"]))
+            assert len(launched) == count, (at, len(launched))
+        launched.clear()
+        runs, stop = [], threading.Event()
+
+        def execute(command: str, file: io.TextIOBase, seconds: float) -> int:
+            if command == "v5-daily":
+                clock.now = _time(together["in_daily"])  # 아침 명령이 도는 중에 개장 15분 전이 된다
+                _until(lambda: len(launched) == 1)
+            if command.startswith("v5-decide"):
+                exited, again = together["in_decide"]
+                clock.now = _time(exited)  # 판단 명령이 도는 중에 실행기가 끝나고, 그 30초 뒤가 된다
+                _until(lambda: launched[0].exited)
+                clock.now = _time(again)
+                _until(lambda: len(launched) == 2)
+            runs.append([command, len(launched)])
+            return 0
+
+        clock.now = _time(together["morning"])
+        thread = threading.Thread(target=v5_serve.supervise, args=(holidays, paths.live, clock, lambda: launch(together["launches"]), stop))
+        thread.start()
+        try:
+            for at in (together["morning"], together["decide"]):
+                clock.now = _time(at)
+                v4_serve.tick(None, {"started_at": "", "running": None, "last": None}, tmp / "v5" / "run.log", v5_serve.period(paths, clock.now), clock, execute, "v5")
+        finally:
+            stop.set()
+            thread.join(5)
+        assert runs == together["runs"] and not thread.is_alive(), runs
+
+
+def _live_state(path: Path, state: dict, account_seq: int) -> None:
+    """live.sqlite3에 그날 설정, 장부, 주문, 정지, 한도·거부, 차례 기록을 쓴다. 차례의 {day, from, to, row}는 그 사이 1분마다(봉 시각 + 10초) 같은 값의 장중 차례다."""
+    columns = ("time", "turn", "mode", "target", "reason", "action", "prices", "cash", "holdings", "equity", "real", "matched")
+    with v5_book.connect(path) as db:
+        for date, mode, ended in state["days"]:
+            db.execute("INSERT INTO days (date, mode, account_seq, ended) VALUES (?, ?, ?, ?)", (date, mode, account_seq, ended))
+        ledgers = {kind: v5_book.create_ledger(db, kind, account_seq, cash, datetime.fromisoformat(at)) for kind, cash, at in state["ledgers"]}
+        for at, kind, symbol, side, tif, quantity, status, toss_status, filled, average, commission, tax, error in state["orders"]:
+            number = f"{kind}-{at}-{symbol}-{side}"
+            v5_book.add_intent(
+                db,
+                {"client_order_id": number, "kind": kind, "ledger_id": ledgers.get(kind), "date": at[:10], "turn": at[11:16], "symbol": symbol, "side": side, "tif": tif, "quantity": quantity, "created_at": at},
+            )
+            v5_book.update_order(db, number, status=status, toss_status=toss_status, filled_quantity=filled, average_price=average, commission=commission, tax=tax, error=error)
+        for at, kind, mode, reason, cleared in state["stops"]:
+            db.execute("UPDATE stops SET cleared_at = ? WHERE id = ?", (cleared, v5_book.add_stop(db, kind, mode, reason, datetime.fromisoformat(at))))
+        for kind, latch, period, value in state["latches"]:
+            v5_book.set_latch(db, ledgers[kind], latch, period, value)
+        for item in state["turns"]:
+            if isinstance(item, list):
+                v5_book.add_turn(db, dict(zip(columns, item)))
+                continue
+            minute = datetime.fromisoformat(f"{item['day']}T{item['from']}")
+            while f"{minute:%H:%M}" <= item["to"]:
+                v5_book.add_turn(db, dict(zip(columns, [f"{minute:%Y-%m-%dT%H:%M}:10+09:00", f"{minute:%H:%M}", *item["row"]])))
+                minute += timedelta(minutes=1)
+
+
+def _stored(directory: Path) -> dict[str, bytes]:
+    """저장 파일의 내용. SQLite는 읽기만 해도 -shm(공유 메모리 색인)을 바꾸고 빈 -wal을 만들므로, -shm은 빼고 빈 -wal은 없는 것으로 본다."""
+    return {
+        str(path): path.read_bytes()
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and not path.name.endswith("-shm") and not (path.name.endswith("-wal") and not path.stat().st_size)
+    }
+
+
+def _contains(text: str, present: list[str], absent: list[str]) -> None:
+    for item in present:
+        assert item in text, (item, text)
+    for item in absent:
+        assert item not in text, (item, text)
+
+
+def case_serve_page() -> None:
+    fixture = _fixture("prd05-serve.json")["page"]
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths, log_path = _serve_paths(tmp, fixture["start"], fixture["holidays"]), tmp / "v5" / "run.log"
+        for row in fixture["decisions"]:
+            v4_head.insert(paths.daily.paper, dict.fromkeys(v4_head.COLUMNS, "") | {"attempts": 0} | row)
+        with closing(sqlite3.connect(paths.daily.paper)) as db, db:
+            db.execute(f"CREATE TABLE settled_days ({v3_daily.SETTLED})")
+            db.executemany("INSERT INTO settled_days VALUES (?, ?)", [(day, "") for day in fixture["settled"]])
+        for report_name, content in fixture["reports"].items():
+            folder = tmp / "reports" / report_name
+            folder.mkdir(parents=True)
+            (folder / "report.json").write_text(json.dumps(content["report"], ensure_ascii=False), encoding="utf-8")
+            with (folder / "trades-head.csv").open("w", newline="", encoding="utf-8") as file:
+                csv.writer(file).writerows([report.TRADE_COLUMNS, *content["trades_head"]])
+        log_path.write_text("".join(f"줄 {number:02d}\n" for number in range(1, fixture["log_lines"] + 1)), encoding="utf-8")
+        paths.config.write_text(json.dumps({"account_seq": fixture["account_seq"], "budget": 500000, "max_shares": 1, "orders": True}), encoding="utf-8")
+        (tmp / "toss").mkdir()
+        (tmp / "toss" / "token.json").write_text(json.dumps({"access_token": fixture["token"]}), encoding="utf-8")
+        _live_state(paths.live, fixture["live"], fixture["account_seq"])
+        now = _time(fixture["now"])
+        render = lambda live: v5_serve.page(paths._replace(live=live), v5_serve.period(paths, now), tmp / "reports", log_path, fixture["status"], now)
+        before = _stored(tmp)
+        httpd = v3_serve.server("127.0.0.1", 0, lambda: render(paths.live))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            with httpx.Client(trust_env=False) as http:
+                response = http.get(f"{base}/")
+                assert response.status_code == 200 and response.headers["content-type"].startswith("text/html"), response
+                assert http.get(f"{base}/other").status_code == 404 and http.post(f"{base}/").status_code == 501
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+        assert _stored(tmp) == before, "페이지를 열었더니 저장된 파일이 바뀌었다"
+        _contains(response.text, fixture["present"], fixture["absent"])
+        tree = web_acceptance.Tree(response.text)
+        assert [card.find("h2")[0].text() for card in tree.root.find("div", "card")] == fixture["cards"], response.text
+        assert [day.find("div", "date")[0].text() for day in tree.root.find("div", "day")] == fixture["map"], response.text
+        for tag, attrs in tree.tags:
+            assert tag not in web_acceptance.BANNED_TAGS, tag
+            for key, value in attrs:
+                assert key not in web_acceptance.BANNED_ATTRIBUTES and not key.startswith("on") and "javascript:" not in (value or "").lower(), (tag, key, value)
+        (style,) = tree.root.find("style")
+        assert "@import" not in style.text().lower() and "url(" not in style.text().lower(), style.text()
+        practice = fixture["practice"]
+        _live_state(tmp / "practice" / "live.sqlite3", practice, fixture["account_seq"])
+        _contains(render(tmp / "practice" / "live.sqlite3"), practice["present"], practice["absent"])
+        _contains(render(tmp / "empty" / "live.sqlite3"), fixture["empty"], [])
+        assert not (tmp / "empty").exists(), "기록이 없을 때 페이지가 live.sqlite3를 만들었다"
+
+
 CASES = {
     "01": [
         ("계좌·보유·매수 가능 금액·수수료율·상하한가·주문 생성·취소·상세·목록의 주소·쿼리·두 헤더·본문, 계좌번호는 끝 네 자리만, 인증 정보·계좌번호·토큰이 출력과 파일에 없음", case_client_requests),
@@ -1180,6 +1397,24 @@ CASES = {
     "04": [
         ("끝 없는 기간: 여섯째·일곱째 거래일에도 v5-daily가 전 거래일을 정산하고 개장 전 판단을 하며 v5-decide도 판단함, 기간 끝·기간 종료가 나오지 않음", case_run_open_period),
         ("보고서: 실장부의 현금·보유·마감 봇 자산·총수익·수수료·세금·실주문 수·안전 정지 수, 날마다 모의 계좌·봇 자산 수익률, orders.csv(연습 주문 없음), 판정 없음, 엔진 기간 마지막 날 없음", case_run_report),
+    ],
+    "05": [
+        (
+            "실행 차례(v4 사례에서 옮김): 정상일·10시 개장일·수능일의 아침·판단 차례, 판단 마감과 09:50 경계, 휴장일·주말, 다음 실행 예정 시각, 일곱째 거래일에도 판단 차례(끝 없는 기간),"
+            " 아침은 v5-daily·v5-report(앞이 실패해도), 판단은 v5-decide --at s, 실행 기록과 종료 코드, 시간 제한을 넘기면 V5_COMMAND_TIMEOUT",
+            case_serve_schedule,
+        ),
+        (
+            "실행기 돌보기: 정상일 08:45·10시 개장일과 수능일 09:45부터 켜고 끝 차례는 15:40·16:40, end 전에 끝나면 30초 뒤 다시 켬(c + 10분 뒤 포함),"
+            " end 기록 뒤·자정 뒤·휴장일·주말에는 켜지 않음, 아침·판단 명령이 도는 동안에도 켜고 다시 켬",
+            case_serve_live,
+        ),
+        (
+            "현황 웹페이지: GET /에 그날 방식, 정지 종류·방식·이유·시각과 수동 확인 필요 안내, 봇 보유·현금·자산·수익·가격, 실계좌 대조(장부와 다름), 한도, 오늘 차례 최근 20개와 오늘 주문,"
+            " v5-* 최신 보고서의 헤드 계좌 칸, 최근 5거래일 판단 지도, 연습 운용 표시, 기록 없는 첫날, 계좌번호·account_seq·토큰 없음, 이유 속 <script>는 글자로,"
+            " 서버 밖 파일·스크립트 없음, 다른 경로 404·POST 501, 파일을 바꾸지 않음(v4 사례에서 옮김)",
+            case_serve_page,
+        ),
     ],
 }
 

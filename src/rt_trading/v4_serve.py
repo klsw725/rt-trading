@@ -137,10 +137,11 @@ def tick(
     period: v3_daily.Period,
     clock: Callable[[], datetime],
     execute: Callable[[str, TextIO, float], int | None],
+    prefix: str = "v4",
 ) -> str | None:
     """한 번의 확인. 아직 실행하지 않은 차례이면 그 차례의 명령을 차례로 실행하고 그 차례를, 아니면 done을 돌려준다.
 
-    아침 차례는 v4-daily와 v4-report(앞이 실패해도), 판단 차례는 v4-decide --at s다.
+    아침 차례는 v4-daily와 v4-report(앞이 실패해도), 판단 차례는 v4-decide --at s다. prefix가 v5면 v5 명령이다(v5 PRD 05).
     execute에는 시간 제한(아침 09:55, 판단 마감 1분 뒤)까지 남은 초를 주고, 끝나지 않아 멈췄으면 None을 받는다.
     """
     slot = due(clock(), period)
@@ -148,10 +149,10 @@ def tick(
         return done
     day, name, started = slot[:10], slot[11:], _stamp(clock())
     if name.startswith("아침"):
-        commands, stop = ["v4-daily", "v4-report"], _at(day, MORNING_STOP)
+        commands, stop = [f"{prefix}-daily", f"{prefix}-report"], _at(day, MORNING_STOP)
     else:
         deadline = next(item.deadline for item in v4_head.slots(day) if item.time == name[3:])
-        commands, stop = [f"v4-decide --at {name[3:]}"], _at(day, deadline) + DECIDE_GRACE
+        commands, stop = [f"{prefix}-decide --at {name[3:]}"], _at(day, deadline) + DECIDE_GRACE
     status["running"] = {"slot": name, "started_at": started}
     log_path.parent.mkdir(parents=True, exist_ok=True)
     exits = []
@@ -162,7 +163,7 @@ def tick(
             left = (stop - clock()).total_seconds()
             code = execute(command, file, left) if left > 0 else None
             if code is None:
-                file.write(f"V4_COMMAND_TIMEOUT: {stop:%H:%M}까지 마치지 못해 멈췄다({command})\n")
+                file.write(f"{prefix.upper()}_COMMAND_TIMEOUT: {stop:%H:%M}까지 마치지 못해 멈췄다({command})\n")
                 file.flush()
             exits.append([command, code])
     status["last"] = {"slot": name, "started_at": started, "finished_at": _stamp(clock()), "exits": exits}
