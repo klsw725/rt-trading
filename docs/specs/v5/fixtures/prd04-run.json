@@ -1,0 +1,26 @@
+{
+  "history": {"from": "2025-07-21", "to": "2025-10-24", "prices": {"069500": 10000, "114800": 1500}},
+  "start": "2025-10-27",
+  "days": ["2025-10-27", "2025-10-28", "2025-10-29", "2025-10-30", "2025-10-31", "2025-11-03", "2025-11-04"],
+  "us": {"from": "2025-08-01", "to": "2025-11-03", "prices": {"SOXX": "200", "QQQ": "500", "SPY": "600", "MU": "100"}},
+  "reply": "{\"subordinate\": \"cash\", \"reason\": \"쉰다\", \"notes\": \"\"}",
+  "token": {"access": "access-FAKE", "refresh": "refresh-FAKE", "account_id": "account-FAKE"},
+  "checks": {
+    "2025-11-03": {"settled_last": "2025-10-31", "pre_open": "ok"},
+    "2025-11-04": {"settled_last": "2025-11-03", "pre_open": "ok"}
+  },
+  "decide": {"day": "2025-11-03", "slot": "10:00", "at": "10:00:05", "status": "ok"},
+  "absent": ["기간 끝", "기간 종료"],
+  "live": {
+    "ledger": {"start_cash": 500000, "created_at": "2025-10-31T08:45:00+09:00"},
+    "orders": [
+      {"client_order_id": "v5-20251031-0901-069500-B", "date": "2025-10-31", "turn": "09:01", "symbol": "069500", "side": "BUY", "quantity": 10, "order_id": "ord-1", "status": "final", "toss_status": "FILLED", "filled": 10, "amount": 100000, "commission": 15, "tax": 0, "at": "2025-10-31T09:02:10+09:00"},
+      {"client_order_id": "v5-20251103-0901-069500-S", "date": "2025-11-03", "turn": "09:01", "symbol": "069500", "side": "SELL", "quantity": 10, "order_id": "ord-2", "status": "final", "toss_status": "FILLED", "filled": 10, "amount": 100000, "commission": 15, "tax": 0, "at": "2025-11-03T09:02:10+09:00"},
+      {"client_order_id": "v5-20251103-0902-069500-B", "date": "2025-11-03", "turn": "09:02", "symbol": "069500", "side": "BUY", "quantity": 5, "order_id": null, "status": "rejected", "toss_status": null, "filled": 0, "amount": 0, "commission": 0, "tax": 0, "at": "2025-11-03T09:02:10+09:00"}
+    ],
+    "stops": [["safety", "hold", "거부가 세 번 이어졌다"]],
+    "expected": {"start_cash": 500000, "cash": 499970, "holdings": {}, "close_equity": 499970, "total_return": -6e-05, "commission_total": 30, "tax_total": 0, "orders": 2, "safety_stops": 1},
+    "daily": [["2025-10-31", 0.0, 499985, -3e-05], ["2025-11-03", 0.0, 499970, -3.000090002700081e-05]],
+    "orders_csv": 3
+  }
+}

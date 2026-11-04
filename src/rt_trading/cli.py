@@ -33,6 +33,7 @@ from rt_trading import (
     v4_report,
     v4_serve,
     v5_live,
+    v5_report,
     v5_target,
     web_acceptance,
 )
@@ -89,6 +90,10 @@ def main() -> None:
     commands.add_parser("web-acceptance", help="현황 웹페이지 모양(web SPEC) acceptance를 네트워크 없이 실행한다")
     v5_checks = commands.add_parser("v5-acceptance", help="v5 acceptance를 네트워크 없이 실행한다")
     v5_checks.add_argument("--prd", choices=sorted(v5_acceptance.CASES))
+    commands.add_parser("v5-daily", help="v5 아침 실행: 시세를 받아 밀린 날을 정산하고 오늘 개장 전 판단을 한다(기간 끝 없음)")
+    v5_decide = commands.add_parser("v5-decide", help="v5 장중·마감 전 판단 한 번: 당일 1분봉과 뉴스를 받아 판단한다")
+    v5_decide.add_argument("--at", required=True, help="판단 차례 HH:MM")
+    commands.add_parser("v5-report", help="v5 보고서: 헤드 모의 계좌와 실장부, 주문, 날마다의 수익률")
     commands.add_parser("v5-live", help="v5 실계좌 실행기: 그날 끝 차례까지 목표 보유를 실계좌에 맞춘다")
     v5_stop = commands.add_parser("v5-stop", help="v5 실행기를 멈춘다(보유 그대로). --sell이면 멈추고 다 판다")
     v5_stop.add_argument("--sell", action="store_true")
@@ -131,6 +136,12 @@ def main() -> None:
         sys.exit(web_acceptance.run())
     if args.command == "v5-acceptance":
         sys.exit(v5_acceptance.run(args.prd))
+    if args.command == "v5-daily":
+        sys.exit(run_v5_daily())
+    if args.command == "v5-decide":
+        sys.exit(run_v5_decide(args.at))
+    if args.command == "v5-report":
+        sys.exit(v5_report.run(V5_LIVE, v5_period, REPORT_DIR, lambda: datetime.now(toss.KST)))
     if args.command == "v5-stop":
         sys.exit(v5_live.stop(V5_LIVE, args.sell, lambda: datetime.now(toss.KST)))
     if args.command in ("v5-live", "v5-resume", "v5-check"):
@@ -204,6 +215,32 @@ def run_v4_decide(slot: str) -> int:
         bars = lambda day, seconds: v4_daily.fetch_bars(ROOT, day, seconds)
         return v4_daily.decide(
             V4_PATHS, v4_daily.PERIOD, v3_daily.HOLIDAYS, slot, bars, news, http, lambda: codex.credentials(codex.TOKEN_DIR), clock, time.sleep
+        )
+
+
+def v5_period():
+    """오늘(한국 시각) 기준의 v5 기간. 기간 마지막 날은 늘 오늘 뒤다(v5 PRD 02)."""
+    return v5_target.load_period(v5_target.PERIOD, v3_daily.HOLIDAYS, datetime.now(toss.KST).date().isoformat())
+
+
+def run_v5_daily() -> int:
+    """v5 아침 실행. v4-daily와 같고, v5 파일 위치와 끝 없는 기간을 쓴다."""
+    clock = lambda: datetime.now(toss.KST)
+    with httpx.Client() as http:
+        news = lambda cutoff, deadline, path: v4_news.fetch(http, v4_news.read_credentials(ROOT), cutoff, deadline, clock, path)
+        return v4_daily.run(
+            V5_PATHS, v5_target.PERIOD, v3_daily.HOLIDAYS, fetch_market, news, http, lambda: codex.credentials(codex.TOKEN_DIR), clock, time.sleep, v5_period
+        )
+
+
+def run_v5_decide(slot: str) -> int:
+    """v5 장중·마감 전 판단 한 번. v4-decide와 같고, v5 파일 위치와 끝 없는 기간을 쓴다."""
+    clock = lambda: datetime.now(toss.KST)
+    with httpx.Client() as http:
+        news = lambda cutoff, deadline, path: v4_news.fetch(http, v4_news.read_credentials(ROOT), cutoff, deadline, clock, path)
+        bars = lambda day, seconds: v4_daily.fetch_bars(ROOT, day, seconds)
+        return v4_daily.decide(
+            V5_PATHS, v5_target.PERIOD, v3_daily.HOLIDAYS, slot, bars, news, http, lambda: codex.credentials(codex.TOKEN_DIR), clock, time.sleep, v5_period
         )
 
 

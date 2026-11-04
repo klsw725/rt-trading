@@ -14,6 +14,7 @@ from collections.abc import Callable
 from contextlib import closing
 from datetime import date as Date
 from datetime import datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from unittest import mock
 
@@ -35,6 +36,7 @@ from rt_trading import (
     v4_paper,
     v5_book,
     v5_live,
+    v5_report,
     v5_target,
 )
 from rt_trading.toss import KST
@@ -998,6 +1000,105 @@ def case_live_reasons() -> None:
     assert json.loads(row["limits"]) == {"daily": False, "weekly": False}, row
 
 
+# PRD 04 운영과 보고
+
+
+@functools.cache
+def _run_v5_days() -> tuple[dict, list[dict]]:
+    """PRD 04 fixture의 날마다 07:30 v5-daily와 여섯째 날 v5-decide를 끝 없는 기간으로 한 번 돌려 사례들이 함께 쓴다.
+
+    (날짜·판단 → 결과, 실행마다 출력)을 돌려주고, 보고서 사례가 쓰도록 임시 폴더를 남긴다(_RUN_HOLDER).
+    """
+    fixture = _fixture("prd04-run.json")
+    holder = tempfile.TemporaryDirectory()
+    _RUN_HOLDER.append(holder)
+    tmp = Path(holder.name)
+    paths = v4_daily.Paths(tmp / "market.sqlite3", tmp / "v5" / "market.sqlite3", tmp / "v5" / "paper.sqlite3", tmp / "v5" / "head", tmp / "v5" / "news", tmp / "us.sqlite3")
+    (tmp / "v5_period.json").write_text(json.dumps({"start": fixture["start"]}), encoding="utf-8")
+    (tmp / "krx_holidays.csv").write_text("date,reason\n", encoding="utf-8")
+    with closing(sqlite3.connect(paths.us)) as db, db:
+        db.execute(f"CREATE TABLE us_candles_1d ({v3_us.TABLE})")
+        db.executemany("INSERT INTO us_candles_1d VALUES (?, ?, ?)", [(symbol, day, price) for day in _weekdays(fixture["us"]["from"], fixture["us"]["to"]) for symbol, price in fixture["us"]["prices"].items()])
+    (tmp / "token" / "auth").mkdir(parents=True)
+    (tmp / "token" / "auth" / "codex.json").write_text(json.dumps(fixture["token"] | {"expires": v4_acceptance.FAR_FUTURE_MS}), encoding="utf-8")
+    history = _weekdays(fixture["history"]["from"], fixture["history"]["to"])
+    results, outputs = {}, []
+
+    def fetch(left: float, clock: v4_acceptance._Clock) -> int:
+        today = clock.now.date().isoformat()
+        days = [{"date": history[0], "prices": fixture["history"]["prices"]}] + [{"date": day} for day in history[1:] + [day for day in fixture["days"] if day < today]]
+        fixtures.build({"fetched_at": clock.now.isoformat(), "volume": 1000, "days": days}, paths.source)
+        return 0
+
+    def bars(day: str, seconds: float) -> dict:
+        return v4_acceptance._bars(day, {symbol: {} for symbol in v5_target.SYMBOLS}) | {
+            symbol: [v4_acceptance.market_data.Bar(time, price, price, price, price, 1000) for time in v4_acceptance.sessions.session(day, v4_acceptance.sessions.exceptions()).bars if time <= "10:00"]
+            for symbol, price in fixture["history"]["prices"].items()
+        }
+
+    for day in fixture["days"]:
+        steps = [("daily", "07:30:00")] + ([("decide", fixture["decide"]["at"])] if day == fixture["decide"]["day"] else [])
+        for command, at in steps:
+            clock, output = v4_acceptance._Clock(day, at), io.StringIO()
+            fake = v4_acceptance._Codex(fixture, clock, [["ok", 5, fixture["reply"]]])
+            period = lambda clock=clock: v5_target.load_period(tmp / "v5_period.json", tmp / "krx_holidays.csv", clock.now.date().isoformat())
+            credentials = lambda: codex.credentials(tmp / "token")
+            with contextlib.redirect_stdout(output), httpx.Client(transport=httpx.MockTransport(fake.handler)) as http:
+                if command == "daily":
+                    v4_daily.run(paths, tmp / "v5_period.json", tmp / "krx_holidays.csv", lambda left, clock=clock: fetch(left, clock), lambda *args: ([], []), http, credentials, clock, clock.sleep, period)
+                else:
+                    v4_daily.decide(paths, tmp / "v5_period.json", tmp / "krx_holidays.csv", fixture["decide"]["slot"], bars, lambda *args: ([], []), http, credentials, clock, clock.sleep, period)
+            outputs.append(output.getvalue())
+            decisions = {(row["date"], row["slot"]): row["status"] for row in v4_head.read(paths.paper)}
+            results[(day, command)] = {"settled": v3_daily.settled_days(paths.paper), "decisions": decisions}
+    return {"paths": paths, "tmp": tmp, "results": results}, outputs
+
+
+_RUN_HOLDER: list = []
+
+
+def case_run_open_period() -> None:
+    fixture = _fixture("prd04-run.json")
+    run, outputs = _run_v5_days()
+    for day, check in fixture["checks"].items():
+        result = run["results"][(day, "daily")]
+        first = v4_head.slots(day)[0].time
+        assert result["settled"][-1] == check["settled_last"] and result["decisions"].get((day, first)) == check["pre_open"], (day, result)
+    decide = fixture["decide"]
+    assert run["results"][(decide["day"], "decide")]["decisions"].get((decide["day"], decide["slot"])) == decide["status"], run["results"][(decide["day"], "decide")]
+    for output in outputs:
+        for word in fixture["absent"]:
+            assert word not in output, (word, output)
+
+
+def case_run_report() -> None:
+    fixture = _fixture("prd04-run.json")
+    run, _ = _run_v5_days()
+    item, tmp = fixture["live"], run["tmp"]
+    live_paths = v5_live.Paths(run["paths"], tmp / "v5" / "live.sqlite3", tmp / "v5" / "config.json", tmp / "v5" / "live.lock", tmp / "v5" / "order.lock", tmp / "v5_period.json", tmp / "krx_holidays.csv")
+    with v5_book.connect(live_paths.live) as db:
+        ledger = v5_book.create_ledger(db, "live", 3, item["ledger"]["start_cash"], datetime.fromisoformat(item["ledger"]["created_at"]))
+        for order in item["orders"]:
+            v5_book.add_intent(db, {key: order[key] for key in ("client_order_id", "date", "turn", "symbol", "side", "quantity")} | {"kind": "live", "ledger_id": ledger, "tif": "DAY", "created_at": order["at"]})
+            v5_book.update_order(db, order["client_order_id"], status=order["status"], order_id=order["order_id"])
+            if order["filled"]:
+                snapshot = {"status": order["toss_status"], "filled_quantity": order["filled"], "filled_amount": Decimal(order["amount"]), "average_price": None, "commission": Decimal(order["commission"]), "tax": Decimal(order["tax"])}
+                v5_book.apply_fill(db, v5_book.orders(db, "client_order_id = ?", (order["client_order_id"],))[0], snapshot, datetime.fromisoformat(order["at"]))
+        for kind, mode, reason in item["stops"]:
+            v5_book.add_stop(db, kind, mode, reason, datetime.fromisoformat(item["ledger"]["created_at"]))
+    period = v5_target.load_period(tmp / "v5_period.json", tmp / "krx_holidays.csv", fixture["days"][-1])
+    content, _, _, orders, daily = v5_report.build(live_paths, period)
+    live = content["live"]
+    for key, value in item["expected"].items():
+        same = abs(live[key] - value) < 1e-12 if isinstance(value, float) else live[key] == value
+        assert same, (key, live[key], value)
+    assert len(daily) == len(item["daily"]), daily
+    for row, (day, head, equity, bot) in zip(daily, item["daily"], strict=True):
+        assert row["date"] == day and abs(row["head_return"] - head) < 1e-12 and row["close_equity"] == equity and abs(row["bot_return"] - bot) < 1e-12, (row, day)
+    assert len(orders) == item["orders_csv"] and content["verdict"] is None and any(account["id"] == "head" for account in content["accounts"]), orders
+    assert period.final_day not in json.dumps(content, ensure_ascii=False), ("엔진에 주는 기간 마지막 날이 보고서에 있음", period.final_day)
+
+
 CASES = {
     "01": [
         ("계좌·보유·매수 가능 금액·수수료율·상하한가·주문 생성·취소·상세·목록의 주소·쿼리·두 헤더·본문, 계좌번호는 끝 네 자리만, 인증 정보·계좌번호·토큰이 출력과 파일에 없음", case_client_requests),
@@ -1075,6 +1176,10 @@ CASES = {
             " 차례 기록에 두 종목 가격·봇 현금·보유·자산·실계좌 수량과 대조·한도가 남음",
             case_live_reasons,
         ),
+    ],
+    "04": [
+        ("끝 없는 기간: 여섯째·일곱째 거래일에도 v5-daily가 전 거래일을 정산하고 개장 전 판단을 하며 v5-decide도 판단함, 기간 끝·기간 종료가 나오지 않음", case_run_open_period),
+        ("보고서: 실장부의 현금·보유·마감 봇 자산·총수익·수수료·세금·실주문 수·안전 정지 수, 날마다 모의 계좌·봇 자산 수익률, orders.csv(연습 주문 없음), 판정 없음, 엔진 기간 마지막 날 없음", case_run_report),
     ],
 }
 

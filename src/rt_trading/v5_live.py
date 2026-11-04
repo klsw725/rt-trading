@@ -60,6 +60,22 @@ def turns(day: str) -> list[Turn]:
     return found
 
 
+def close_equity(paths: Paths, db: sqlite3.Connection, ledger: dict, day: str) -> int | None:
+    """마감 봇 자산: day 마감(c + 10분)까지의 장부와 정산한 day 종가. day가 정산되지 않았으면 None이다(PRD 03)."""
+    if day not in v3_daily.settled_days(paths.daily.paper):
+        return None
+    session = sessions.session(day, sessions.exceptions())
+    cash, held = v5_book.balance(db, ledger["id"], (_at(day, session.close) + timedelta(minutes=10)).isoformat(timespec="seconds"))
+    closes = {}
+    with closing(sqlite3.connect(f"{paths.daily.copy.resolve().as_uri()}?mode=ro", uri=True)) as market:
+        for symbol in held:
+            row = market.execute("SELECT close FROM candles_1d WHERE symbol = ? AND date = ?", (symbol, day)).fetchone()
+            if row is None:
+                return None
+            closes[symbol] = row[0]
+    return cash + sum(count * closes[symbol] for symbol, count in held.items())
+
+
 def quantity(cash: int, price: int, rate: Decimal, max_shares: int | None) -> int:
     """수량 × 가격 + 수수료(원 미만 올림)가 cash 이하인 최대 정수 주. max_shares보다 크지 않다."""
     count = cash // price
@@ -531,20 +547,7 @@ class Live:
         return "block" if daily or weekly else None
 
     def _close_equity(self, db: sqlite3.Connection, ledger: dict, day: str) -> int | None:
-        """day 마감(c + 10분)까지의 장부와 정산한 day 종가로 계산한 봇 자산. 정산되지 않았으면 None."""
-        if day not in v3_daily.settled_days(self.paths.daily.paper):
-            return None
-        session = sessions.session(day, sessions.exceptions())
-        until = (_at(day, session.close) + timedelta(minutes=10)).isoformat(timespec="seconds")
-        cash, held = v5_book.balance(db, ledger["id"], until)
-        closes = {}
-        with closing(sqlite3.connect(f"{self.paths.daily.copy.resolve().as_uri()}?mode=ro", uri=True)) as market:
-            for symbol in held:
-                row = market.execute("SELECT close FROM candles_1d WHERE symbol = ? AND date = ?", (symbol, day)).fetchone()
-                if row is None:
-                    return None
-                closes[symbol] = row[0]
-        return cash + sum(count * closes[symbol] for symbol, count in held.items())
+        return close_equity(self.paths, db, ledger, day)
 
     def _week_start(self) -> str:
         day = datetime.fromisoformat(self.today)

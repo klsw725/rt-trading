@@ -144,10 +144,14 @@ def run(
     credentials: Callable[[], tuple[str, str]],
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
+    period: Callable[[], v3_daily.Period] | None = None,
 ) -> int:
-    """v4-daily: v3-daily의 순서로 시세 받기·정산·개장 전 판단을 한다. 하나라도 실패하면 1이다. fetch는 시세 받기에 쓸 수 있는 초를 받는다."""
+    """v4-daily: v3-daily의 순서로 시세 받기·정산·개장 전 판단을 한다. 하나라도 실패하면 1이다. fetch는 시세 받기에 쓸 수 있는 초를 받는다.
+
+    period를 주면 v4 기간 대신 그 기간을 쓴다(v5 PRD 04의 끝 없는 기간).
+    """
     try:
-        period = v3_daily.load_period(period_path, holidays_path, "V4_PERIOD_INVALID")
+        period = period() if period else v3_daily.load_period(period_path, holidays_path, "V4_PERIOD_INVALID")
     except v3_daily.DailyError as error:
         print(error)
         return 1
@@ -210,10 +214,14 @@ def decide(
     credentials: Callable[[], tuple[str, str]],
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
+    period: Callable[[], v3_daily.Period] | None = None,
 ) -> int:
-    """v4-decide --at slot: 장중·마감 전 판단 한 번. 판단이 ok나 capped면 0이다. 시세 사본과 정산은 바꾸지 않는다."""
+    """v4-decide --at slot: 장중·마감 전 판단 한 번. 판단이 ok나 capped면 0이다. 시세 사본과 정산은 바꾸지 않는다.
+
+    period를 주면 v4 기간 대신 그 기간을 쓴다(v5 PRD 04).
+    """
     try:
-        period = v3_daily.load_period(period_path, holidays_path, "V4_PERIOD_INVALID")
+        period = period() if period else v3_daily.load_period(period_path, holidays_path, "V4_PERIOD_INVALID")
     except v3_daily.DailyError as error:
         print(error)
         return 1
