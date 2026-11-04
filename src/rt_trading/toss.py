@@ -3,9 +3,11 @@
 import fcntl
 import json
 import os
+import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,6 +21,12 @@ PRICE_KEYS = ("openPrice", "highPrice", "lowPrice", "closePrice", "volume")
 TOKEN_ERRORS = ("token-revoked", "expired-token", "invalid-token")
 TOKEN_MARGIN = timedelta(minutes=10)  # 만료까지 이보다 적게 남은 토큰은 새로 받는다
 _sleep = time.sleep  # acceptance가 기다린 시간을 기록하려고 바꿔 끼운다
+INTERRUPT: ContextVar[Callable[[], bool] | None] = ContextVar("INTERRUPT", default=None)  # v5 실행기의 새 정지 확인. 없으면 보내기와 기다리기가 이전과 같다
+DEADLINE: ContextVar[float | None] = ContextVar("DEADLINE", default=None)  # v5 실행기가 요청 하나의 응답을 기다리는 벽시계 상한(초). 없으면 httpx 시간 제한만 쓴다
+
+
+class Interrupted(Exception):
+    """v5 실행기의 차례 중에 새 정지가 들어와 토스 요청을 보내지 않고 그만뒀다. 토스 오류가 아니다(v5 SPEC 4.6의 5초)."""
 
 
 class TossError(Exception):
@@ -90,7 +98,16 @@ class SharedToken:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self.path.parent, 0o700)
         with open(self.path.with_name("token.lock"), "a") as file:
-            fcntl.flock(file, fcntl.LOCK_EX)
+            if INTERRUPT.get() is None:
+                fcntl.flock(file, fcntl.LOCK_EX)
+            else:
+                while True:  # v5 실행기: 다른 쪽이 토큰을 받는 동안 기다리며 새 정지를 본다
+                    try:
+                        fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        _check()
+                        _sleep(0.2)
             try:
                 yield
             finally:
@@ -193,6 +210,50 @@ def _kst(timestamp: str) -> datetime:
     return datetime.fromisoformat(timestamp).astimezone(KST)
 
 
+def _check() -> None:
+    """INTERRUPT가 있고 참이면 Interrupted다. 요청을 보내기 직전과 기다리는 동안 1초마다 본다."""
+    interrupt = INTERRUPT.get()
+    if interrupt is not None and interrupt():
+        raise Interrupted("정지가 들어와 토스 요청을 보내지 않는다")
+
+
+def _request(http: httpx.Client, method: str, path: str, kwargs: dict) -> httpx.Response:
+    """요청 하나. DEADLINE이 있으면 따로 보내고 응답을 그 초(벽시계)까지만 기다린다. 넘으면 더 기다리지 않고 네트워크 오류(httpx.TimeoutException)다.
+
+    보낸 요청은 끝날 때까지 따로 돌고 그 응답은 쓰지 않는다. 단계별(연결·쓰기·읽기) httpx 시간 제한만으로는 기다림이 그 안에 끝난다고 할 수 없어서다(v5 SPEC 4.6의 5초).
+    """
+    deadline = DEADLINE.get()
+    if deadline is None:
+        return http.request(method, path, **kwargs)
+    outcome: list = []
+
+    def attempt() -> None:
+        try:
+            outcome.append(http.request(method, path, **kwargs))
+        except BaseException as error:  # 따로 보낸 요청의 오류는 부른 쪽에서 다시 낸다
+            outcome.append(error)
+
+    worker = threading.Thread(target=attempt, daemon=True)
+    worker.start()
+    worker.join(deadline)
+    if not outcome:
+        raise httpx.TimeoutException(f"{deadline:g}초 안에 응답이 끝나지 않았다")
+    if isinstance(outcome[0], BaseException):
+        raise outcome[0]
+    return outcome[0]
+
+
+def _wait(seconds: float) -> None:
+    """다시 보내기 전에 seconds초 기다린다. INTERRUPT가 있으면 1초마다 본다."""
+    if INTERRUPT.get() is None:
+        _sleep(seconds)
+        return
+    while seconds > 0:
+        _check()
+        _sleep(min(seconds, 1))
+        seconds -= 1
+
+
 def _send(
     http: httpx.Client, method: str, path: str, token: SharedToken | None = None, retry: bool = True, **kwargs
 ) -> httpx.Response:
@@ -201,14 +262,16 @@ def _send(
     retry면 429는 Retry-After초 기다려 다시 보내고, 5xx와 네트워크 오류는 1·2·4초 뒤 세 번까지 다시 보낸다.
     token(SharedToken)을 주면 보낼 때마다 그 값을 Authorization 헤더에 넣고, 토큰 오류를 받으면 토큰을 바꿔 한 번 다시 보낸다.
     retry가 거짓이면 한 번만 보낸다(v5 주문 생성). 토큰 오류면 토큰을 바꿔 두기만 하고 오류를 낸다.
+    INTERRUPT(v5 실행기)가 참이면 보내기 직전과 다시 보내기를 기다리는 동안 Interrupted로 그만둔다. DEADLINE이 있으면 요청 하나를 그 초까지만 기다린다.
     """
     waits, renewed = iter(RETRY_WAITS), False
     while True:
         if token is not None:
             kwargs["headers"] = {**kwargs.get("headers", {}), "Authorization": f"Bearer {token}"}
         _sleep(1 / 15)  # 초당 15회 이하
+        _check()
         try:
-            response = http.request(method, path, **kwargs)
+            response = _request(http, method, path, kwargs)
             failure = f"HTTP {response.status_code}" if response.status_code >= 500 else None
         except httpx.TransportError as error:
             response, failure = None, type(error).__name__
@@ -218,13 +281,13 @@ def _send(
                 status = response.status_code if response is not None else None
                 message = f"세 번 다시 보내도 실패했다({failure})" if retry else f"보내지 못했다({failure})"
                 raise TossError("V1_TOSS_UNAVAILABLE", message, _remote(response) if response is not None else None, status)
-            _sleep(wait)
+            _wait(wait)
             continue
         if response.status_code == 429:
             seconds = float(response.headers.get("Retry-After", 1))
             if not retry:
                 raise TossError("V5_TOSS_RATE_LIMITED", f"요청 한도를 넘었다({seconds:g}초 뒤 다시)", _remote(response), 429, seconds)
-            _sleep(seconds)
+            _wait(seconds)
             continue
         if response.status_code == 401:
             remote = _remote(response)

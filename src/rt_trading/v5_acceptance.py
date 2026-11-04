@@ -1,5 +1,6 @@
 """v5 acceptance. PRD별 사례를 네트워크 없이 실행하고 결과를 JSON으로 출력한다."""
 
+import argparse
 import contextlib
 import csv
 import fcntl
@@ -764,6 +765,226 @@ def case_live_stops() -> None:
     case.live.bars = stop_while_waiting
     assert _quiet(case.turn, "09:01") == [] and case.clock.now <= _time(f"{case.day}T09:01:15"), ("봉을 기다리는 사이에 들어온 정지를 5초 안에 따르지 않음", case.clock.now)
 
+    for status, headers in ((429, {"Retry-After": "60"}), (500, None)):
+        case = _scenario("lost", broker={"post": []})
+        case.goal = v5_target.Target("069500", None, {})
+        slow = []
+
+        def busy(request: httpx.Request, status: int = status, headers: dict | None = headers) -> httpx.Response:
+            if request.url.path == "/api/v1/holdings" and len(slow) < 3:
+                slow.append(case.clock.now)
+                if len(slow) == 1:
+                    _quiet(v5_live.stop, case.paths, False, case.clock)  # 느린 요청을 보낸 사이에 정지가 들어오고, 요청은 시간 제한까지 걸린 뒤 오류다
+                    case.clock.now += timedelta(seconds=v5_live.REQUEST_TIMEOUT)
+                return httpx.Response(status, json={"error": {"code": "x"}}, headers=headers)
+            return case.broker(request)
+
+        case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(busy))
+        with mock.patch.object(toss, "_sleep", case.clock.sleep):
+            assert _quiet(case.turn, "09:01") == [] and case.clock.now - slow[0] < timedelta(seconds=5), (status, "토스를 기다리는 사이의 정지를 5초 안에 따르지 않음", case.clock.now)
+        assert [stop["kind"] for stop in case.stops()] == ["human"], (status, case.stops())
+    case = _scenario("sell_stop")
+    _quiet(v5_live.stop, case.paths, True, case.clock)
+    case.live._between()  # 차례 사이에서 이 정지를 이미 따랐다
+    failed = []
+
+    def once(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/holdings" and not failed:
+            failed.append(request)
+            return httpx.Response(500, json={"error": {"code": "internal-error"}})
+        return case.broker(request)
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(once))
+    with mock.patch.object(toss, "_sleep", case.clock.sleep):
+        assert _quiet(case.turn, "09:01") == _prd03()["scenarios"]["sell_stop"]["posts"], ("이미 따른 다 팔기 정지 중에 토스 오류 뒤 다시 보내지 않고 그만둠", case.broker.posts)
+    case = _scenario("sell_stop")
+    case.goal = v5_target.Target("069500", None, {})
+
+    def stop_after_holdings(request: httpx.Request) -> httpx.Response:
+        response = case.broker(request)
+        if request.url.path == "/api/v1/holdings":
+            _quiet(v5_live.stop, case.paths, True, case.clock)  # 보유 조회가 정상으로 끝난 바로 뒤에 정지가 들어온다
+        return response
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(stop_after_holdings))
+    assert _quiet(case.turn, "09:01") == [] and [path for _, path, _ in case.broker.seen][-1] == "/api/v1/holdings", ("새 정지 뒤에도 다음 토스 요청을 보냄", case.broker.seen)
+
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+    token_path = case.tmp / "toss" / "token.json"
+    _token_file(token_path, "token-x", case.clock() + timedelta(days=1))
+
+    def revoked_then_stop(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/holdings":
+            _quiet(v5_live.stop, case.paths, False, case.clock)  # 토큰이 끊겼다는 응답을 받는 사이에 정지가 들어온다
+            return httpx.Response(401, json={"error": {"code": "token-revoked"}})
+        return case.broker(request)
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(revoked_then_stop))
+    case.live.token = toss.SharedToken(case.live.http, ("client-id", "client-secret"), token_path, case.clock)
+    assert _quiet(case.turn, "09:01") == [] and "/oauth2/token" not in [path for _, path, _ in case.broker.seen], ("토큰을 새로 받는 사이의 정지에도 토큰을 받음", case.broker.seen)
+    assert [stop["kind"] for stop in case.stops()] == ["human"], ("새 정지로 그만둔 차례를 안전 정지로 봄", case.stops())
+
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+    token_path = case.tmp / "toss" / "token.json"
+    _token_file(token_path, "token-x", case.clock() + timedelta(days=1))
+
+    def revoked_order(request: httpx.Request) -> httpx.Response:
+        if (request.method, request.url.path) == ("POST", "/api/v1/orders"):
+            _quiet(v5_live.stop, case.paths, False, case.clock)  # 주문 생성이 토큰 오류로 받아지지 않은 사이에 정지가 들어온다
+            return httpx.Response(401, json={"error": {"code": "token-revoked"}})
+        return case.broker(request)
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(revoked_order))
+    case.live.token = toss.SharedToken(case.live.http, ("client-id", "client-secret"), token_path, case.clock)
+    _quiet(case.turn, "09:01")
+    assert [order["status"] for order in _orders(case)] == ["abandoned"] and [stop["kind"] for stop in case.stops()] == ["human"], ("토스에 생기지 않은 첫 주문", _orders(case), case.stops())
+
+    case = _scenario("partial")
+    case.goal = v5_target.Target("069500", None, {})
+    _quiet(case.turn, "09:01")
+    case.broker.orders["ord-1"]["status"] = "REPLACED"
+
+    def stop_on_detail(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/orders/ord-1":
+            _quiet(v5_live.stop, case.paths, False, case.clock)  # 안전 정지를 부르는 상세를 받는 사이에 정지가 들어온다
+        return case.broker(request)
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(stop_on_detail))
+    _quiet(case.turn, "09:02")
+    assert case.broker.cancels == ["ord-1"] and {stop["kind"] for stop in case.stops()} == {"human", "safety"}, ("안전 정지의 취소가 새 정지로 그만둠", case.broker.cancels)
+
+    item = _prd03()["scenarios"]["late_start"]
+    case = _scenario("late_start")
+    case.clock.now = _time(item["after_end"])
+    first = []
+
+    def stop_on_accounts(request: httpx.Request) -> httpx.Response:
+        response = case.broker(request)
+        if request.url.path == "/api/v1/accounts" and not first:
+            first.append(request)
+            _quiet(v5_live.stop, case.paths, False, case.clock)  # 시작 점검의 첫 조회가 끝나는 사이에 정지가 들어온다
+        return response
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(stop_on_accounts))
+    assert _quiet(case.live.run) == 0
+    with v5_book.connect(case.paths.live) as db:
+        actions = [row["action"] for row in db.execute("SELECT action FROM turns ORDER BY rowid")]
+    assert actions == item["interrupted_start"], ("새 정지로 그만둔 시작 점검을 정지를 따른 뒤 다시 하지 않음", actions)
+
+    case = _scenario("partial")
+    case.goal = v5_target.Target("069500", None, {})
+    _quiet(case.turn, "09:01")
+    case.clock.now = _time(item["after_end"])
+    _quiet(v5_live.stop, case.paths, False, case.clock)  # 끝 차례 전에 들어와 아직 따르지 않은 정지
+    case.live = case.executor()
+    assert _quiet(case.live.run) == 0 and case.broker.cancels == ["ord-1"] and case.live._day_record()["ended"] == 1, ("새 정지로 그만둔 끝 차례", case.broker.cancels)
+    with v5_book.connect(case.paths.live) as db:
+        actions = [row["action"] for row in db.execute("SELECT action FROM turns ORDER BY rowid")]
+    assert actions[-2:] == item["interrupted_end"], ("새 정지로 그만둔 끝 차례를 정지를 따른 뒤 다시 하지 않음", actions)
+
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+    paced = []
+
+    def stop_while_pacing(seconds: float) -> None:
+        if seconds == 1 / 15 and not paced:
+            paced.append(seconds)
+            _quiet(v5_live.stop, case.paths, False, case.clock)  # 초당 제한으로 잠깐 쉬는 사이에 정지가 들어온다
+        case.clock.sleep(seconds)
+
+    with mock.patch.object(toss, "_sleep", stop_while_pacing):
+        assert _quiet(case.turn, "09:01") == [] and case.broker.seen == [], ("초당 제한으로 쉬는 사이의 정지에도 요청을 보냄", case.broker.seen)
+
+    case = _scenario("lost")
+    case.goal = v5_target.Target("069500", None, {})
+    case.turn("09:01")
+    case.clock.now += timedelta(seconds=10)
+    paced = []
+    with mock.patch.object(toss, "_sleep", stop_while_pacing):
+        case.live._between()
+    assert len(case.broker.posts) == 1, ("차례 사이에 다시 보내기 직전 들어온 정지에도 다시 보냄", case.broker.posts)
+    assert all(stop["id"] in case.live.handled_stops for stop in case.stops()), ("다시 보내기를 그만둔 정지를 바로 따르지 않음", case.stops(), case.live.handled_stops)
+    case.live._between()
+    assert {stop["kind"] for stop in case.stops()} == {"human", "manual"}, ("다시 보내지 않은 결과 모르는 주문", case.stops())
+
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+    hung = []
+
+    def hang_once(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/holdings" and not hung:
+            hung.append(request)
+            time.sleep(2)  # 첫 보유 조회는 실제 시간으로 2초 동안 응답이 끝나지 않는다
+        return case.broker(request)
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(hang_once))
+    started = time.monotonic()
+    with mock.patch.object(v5_live, "REQUEST_TIMEOUT", 0.2), mock.patch.object(toss, "_sleep", case.clock.sleep):
+        posts = _quiet(case.turn, "09:01")
+    assert time.monotonic() - started < 1.5 and posts == [_prd03()["scenarios"]["lost"]["order"]], ("요청 하나를 벽시계 상한까지만 기다리지 않음", time.monotonic() - started, posts)
+
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+    token_path = case.tmp / "toss" / "token.json"
+    _token_file(token_path, "token-x", case.clock() + timedelta(days=1))
+
+    def revoked_while_locked(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/holdings":
+            _quiet(v5_live.stop, case.paths, False, case.clock)  # 토큰이 끊겼다는 응답을 받는 사이에 정지가 들어오고, 토큰 잠금은 다른 쪽이 쥐고 있다
+            return httpx.Response(401, json={"error": {"code": "token-revoked"}})
+        return case.broker(request)
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(revoked_while_locked))
+    case.live.token = toss.SharedToken(case.live.http, ("client-id", "client-secret"), token_path, case.clock)
+    with open(token_path.with_name("token.lock"), "a") as other:
+        fcntl.flock(other, fcntl.LOCK_EX)
+        release = threading.Timer(2, fcntl.flock, (other, fcntl.LOCK_UN))
+        release.start()
+        started = time.monotonic()
+        try:
+            _quiet(case.turn, "09:01")
+        finally:
+            release.cancel()
+            fcntl.flock(other, fcntl.LOCK_UN)
+    assert time.monotonic() - started < 1 and "/oauth2/token" not in [path for _, path, _ in case.broker.seen], ("토큰 잠금을 기다리는 사이의 정지", time.monotonic() - started)
+
+    item = _prd03()["scenarios"]["late_start"]
+    case = _scenario("late_start")
+    case.clock.now = _time(item["after_end"])
+    held = open(case.paths.order_lock, "a")
+    fcntl.flock(held, fcntl.LOCK_EX)  # 다른 쪽(점검 명령 등)이 주문 잠금을 쥐고 있다
+    safety = threading.Timer(2, fcntl.flock, (held, fcntl.LOCK_UN))
+    safety.start()
+    waits = []
+
+    def release_while_waiting(seconds: float) -> None:
+        waits.append(seconds)
+        fcntl.flock(held, fcntl.LOCK_UN)  # 다시 하기 전에 기다리는 사이에 잠금이 풀린다
+        case.clock.sleep(seconds)
+
+    case.live.sleep = release_while_waiting
+    try:
+        assert _quiet(case.live.run) == 0
+    finally:
+        safety.cancel()
+        held.close()
+    with v5_book.connect(case.paths.live) as db:
+        actions = [row["action"] for row in db.execute("SELECT action FROM turns ORDER BY rowid")]
+        ended = v5_book.day(db, case.day)
+    assert waits == [1] and ended and ended["ended"] == 1 and actions == item["busy_start"], ("주문 잠금을 못 잡은 시작 점검·끝 차례를 마친 것으로 봄", waits, actions)
+
+    seen, original = [], httpx.Client
+    with (
+        mock.patch.object(httpx, "Client", lambda **kwargs: seen.append(kwargs["timeout"]) or original(transport=httpx.MockTransport(case.broker), **kwargs)),
+        mock.patch.object(cli, "shared_token", lambda http: "token-x"),
+        mock.patch.object(v5_live.Live, "run", lambda self: 0),
+        mock.patch.object(v5_live, "check", lambda *args: 0),
+    ):
+        codes = [cli.run_v5_live(argparse.Namespace(command="v5-live")), cli.run_v5_live(argparse.Namespace(command="v5-check", order=True))]
+    assert codes == [0, 0] and seen == [v5_live.REQUEST_TIMEOUT, 30] and v5_live.REQUEST_TIMEOUT < 5, ("토스 요청 시간 제한은 v5-live만 짧게", seen)
+
     case = _scenario("lost", broker={"post": []})
     case.goal = v5_target.Target("069500", None, {})
 
@@ -803,6 +1024,7 @@ def case_live_stops() -> None:
     for sell, posts in ((True, fixture["sell_stop"]["posts"]), (False, [])):
         case = _scenario("sell_stop")
         _quiet(v5_live.stop, case.paths, sell, case.clock)
+        case.live._between()  # 실행기처럼 차례 사이에서 정지를 따른 뒤 다음 차례를 한다
         case.goal = v5_target.Target("069500", None, {})
         assert _quiet(case.turn, "09:01") == posts, ("멈추고 다 팔기" if sell else "멈춤", case.broker.posts)
 
@@ -983,6 +1205,7 @@ def case_live_practice() -> None:
     assert ledger is None and record["mode"] == "dry" and [stop["kind"] for stop in case.stops()] == ["safety"], (ledger, record)
     case = _scenario("create")
     _quiet(v5_live.stop, case.paths, False, case.clock)
+    case.live._between()  # 실행기처럼 정지를 따른 뒤 시작 점검을 한다
     _quiet(case.turn, "start")
     with v5_book.connect(case.paths.live) as db:
         assert v5_book.ledger(db, "live") is None and v5_book.day(db, case.day)["mode"] == "dry", "정지 중에 실장부를 만듦"
@@ -1527,7 +1750,10 @@ CASES = {
             case_live_duplicates,
         ),
         (
-            "정지: 주문 직전(진행 중 목록을 보는 사이 포함)에 들어온 정지는 그 주문을 막고, 봉을 기다리는 사이의 정지는 5초 안에 따르며, 차례 사이 정지는 5초 안에 봇 주문을 취소하고,"
+            "정지: 주문 직전(진행 중 목록을 보는 사이 포함)에 들어온 정지는 그 주문을 막고, 봉을 기다리는 사이, 토스가 기다리게 하는 사이(429·5xx), 정상 응답 바로 뒤,"
+            " 토큰을 새로 받거나 토큰 잠금을 기다리는 사이, 초당 제한으로 쉬는 사이, 차례 사이의 다시 보내기 직전의 v5-stop은 다음 요청 없이 5초 안에 따르며"
+            "(안전 정지 아님, 시작 점검·끝 차례는 따른 뒤 다시 하고 주문 잠금을 못 잡으면 1초 뒤 다시 함, 이미 따른 정지 중에는 그대로 다시 보냄,"
+            " v5-live만 요청 하나를 벽시계 5초 미만까지 기다림), 차례 사이 정지는 5초 안에 봇 주문을 취소하고,"
             " 멈춤 중에는 주문 없음, 멈추고 다 팔기는 다음 차례에 팖, 실계좌 수량이 장부와 다르면 안전 정지, 거부가 세 번 이어지면 안전 정지(다시 켜져도 센 것이 이어짐),"
             " 토큰을 바꿔도 이어지는 토큰 오류는 안전 정지",
             case_live_stops,

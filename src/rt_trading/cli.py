@@ -252,7 +252,7 @@ def run_v5_decide(slot: str) -> int:
 def run_v5_live(args: argparse.Namespace) -> int:
     """v5-live, v5-resume, v5-check. 토스 호출은 서버의 함께 쓰는 토큰을 쓴다."""
     clock = lambda: datetime.now(toss.KST)
-    with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
+    with httpx.Client(base_url=toss.BASE_URL, timeout=v5_live.REQUEST_TIMEOUT if args.command == "v5-live" else 30) as http:
         token = shared_token(http)
         if args.command == "v5-live":
             return v5_live.Live(V5_LIVE, http, token, clock, time.sleep).run()

@@ -24,6 +24,7 @@ POLL = 5  # 차례 사이에 정지를 보는 초
 BAR_WAIT = timedelta(seconds=40)
 LOCK_WAIT = 30  # v5-resume·v5-check --order가 주문 잠금을 기다리는 초
 CHECK_WAIT = 60  # 점검 주문이 기대한 상태가 되기를 기다리는 초
+REQUEST_TIMEOUT = 4  # v5-live의 토스 요청이 연결·읽기 단계마다 기다리는 초. 차례 중에 들어온 정지를 5초 안에 따르려고 짧게 둔다(SPEC 4.6)
 
 
 class Paths(NamedTuple):
@@ -168,12 +169,12 @@ class Live:
         if record and record["ended"]:
             return 0
         if record is None:
-            self._turn(plan[0])
+            self._finish(plan[0])
         index = 1
         while True:
             now = self.clock()
             if now >= plan[-1].at:
-                self._turn(plan[-1])
+                self._finish(plan[-1])
                 return 0
             self._between()
             due = [i for i in range(index, len(plan) - 1) if plan[i].at <= now]
@@ -183,22 +184,45 @@ class Live:
                 continue
             self.sleep(min(max((plan[index].at - now).total_seconds(), 0.5), POLL))
 
-    def _turn(self, turn: Turn) -> None:
+    def _finish(self, turn: Turn) -> None:
+        """시작 점검·끝 차례를 마칠 때까지 한다. 새 정지로 그만뒀으면 바로, 주문 잠금을 다른 쪽이 쥐고 있으면 1초 뒤 정지를 따르고 다시 한다."""
+        while (result := self._turn(turn)) != "done":
+            if result == "busy":
+                self.sleep(1)
+            self._between()
+
+    def _turn(self, turn: Turn) -> str:
+        """차례 하나를 한다. 마쳤으면(오류로 건너뛴 것 포함) done, 새 v5-stop으로 그만뒀으면 interrupted, 주문 잠금을 다른 쪽이 쥐고 있으면 busy다.
+
+        그만둔 차례는 부르는 쪽이 주문 잠금을 놓은 뒤 _between으로 정지를 따른다. 차례 중의 토스 요청은 새 v5-stop을 보고, 요청 하나를 REQUEST_TIMEOUT초까지만 기다린다.
+        """
         with file_lock(self.paths.order_lock, 0, self.sleep) as held:
             if not held:
-                self._record(turn, None, "주문 잠금을 다른 쪽이 쥐고 있어 건너뜀")
-                return
+                if turn.name not in ("start", "end"):  # 시작 점검·끝 차례는 다시 하므로 기다리는 동안 기록을 쌓지 않는다
+                    self._record(turn, None, "주문 잠금을 다른 쪽이 쥐고 있어 건너뜀")
+                return "busy"
+            hook, deadline = toss.INTERRUPT.set(self._fresh_stop), toss.DEADLINE.set(REQUEST_TIMEOUT)
             try:
                 {"start": self._start, "end": self._end}.get(turn.name, self._trade)(turn)
+            except toss.Interrupted:
+                self._record(turn, None, "정지가 들어와 이 차례를 그만둠")
+                return "interrupted"
             except Stopped:
                 self._record(turn, None, "안전 정지")
             except toss.TossError as error:
                 if toss_account.classify(error) == "stop" or error.code in toss_account.TOKEN_CODES:  # 조회·취소의 토큰 오류는 토큰을 바꿔 다시 보낸 뒤에도 이어진 것이다
                     self._stop("safety", f"토스 응답 오류({error.code} {error.remote})")
                 self._record(turn, None, f"토스 오류로 이 차례를 건너뜀({error.code})")
+            finally:
+                toss.INTERRUPT.reset(hook)
+                toss.DEADLINE.reset(deadline)
+        return "done"
 
     def _between(self) -> None:
-        """차례 사이: 결과 모르는 낼 주문을 처리하고, 새 정지가 있으면 봇 주문을 취소한다."""
+        """차례 사이: 결과 모르는 낼 주문을 처리하고, 새 정지가 있으면 봇 주문을 취소한다.
+
+        결과 모르는 주문을 다시 보내기 직전에도 새 v5-stop을 본다. 그 사이 들어왔으면 보내지 않고, 그 정지를 바로 따른 뒤 그 주문은 다음 확인에서 수동 확인 필요가 된다(SPEC 4.3).
+        """
         with v5_book.connect(self.paths.live) as db:
             stops = v5_book.active_stops(db)
             unknown = v5_book.orders(db, "status IN ('sending', 'unknown')")
@@ -207,39 +231,49 @@ class Live:
             return
         with file_lock(self.paths.order_lock, 0, self.sleep) as held:
             if held:
+                hook, deadline = toss.INTERRUPT.set(self._fresh_stop), toss.DEADLINE.set(REQUEST_TIMEOUT)
                 try:
                     self._resolve_unknown()
+                except (Stopped, toss.Interrupted):
+                    pass
+                finally:
+                    toss.INTERRUPT.reset(hook)
+                fresh = [stop for stop in self._stops() if stop["id"] not in self.handled_stops]
+                try:
                     if fresh:
                         self._cancel_all()
                         self.handled_stops |= {stop["id"] for stop in fresh}
-                except Stopped:
-                    pass
+                finally:
+                    toss.DEADLINE.reset(deadline)
 
     # 차례
 
     def _start(self, turn: Turn) -> None:
+        """시작 점검. 새 정지로 그만둔 뒤 다시 하면 이미 정한 그날 방식으로 나머지 점검만 한다."""
         now, config = self.clock(), read_config(self.paths.config)
         with v5_book.connect(self.paths.live) as db:
-            if v5_book.day(db, self.today):
-                return
+            record = v5_book.day(db, self.today)
             live = v5_book.ledger(db, "live")
-        mode, account = ("live", live["account_seq"]) if live else ("dry", None)
-        problem = None
-        if config is None:
-            problem = "설정 파일이 없거나 틀리다"
-        elif config["orders"]:
-            mode, account, problem = self._live_start(config, live)
+        if record:
+            mode = record["mode"]
         else:
-            account = config["account_seq"]
-            if live and self._live_busy(live):
-                mode, account, problem = "live", live["account_seq"], "실장부에 보유나 끝나지 않은 주문이 있어 연습 운용으로 돌아가지 못한다"
-        with v5_book.connect(self.paths.live) as db:
-            if mode == "dry" and v5_book.ledger(db, "dry") is None:
-                v5_book.create_ledger(db, "dry", account, config["budget"] if config else 0, now)
-            db.execute("INSERT INTO days (date, mode, account_seq) VALUES (?, ?, ?)", (self.today, mode, account))
-        if problem:
-            self._stop("safety", problem)
-            raise Stopped
+            mode, account = ("live", live["account_seq"]) if live else ("dry", None)
+            problem = None
+            if config is None:
+                problem = "설정 파일이 없거나 틀리다"
+            elif config["orders"]:
+                mode, account, problem = self._live_start(config, live)
+            else:
+                account = config["account_seq"]
+                if live and self._live_busy(live):
+                    mode, account, problem = "live", live["account_seq"], "실장부에 보유나 끝나지 않은 주문이 있어 연습 운용으로 돌아가지 못한다"
+            with v5_book.connect(self.paths.live) as db:
+                if mode == "dry" and v5_book.ledger(db, "dry") is None:
+                    v5_book.create_ledger(db, "dry", account, config["budget"] if config else 0, now)
+                db.execute("INSERT INTO days (date, mode, account_seq) VALUES (?, ?, ?)", (self.today, mode, account))
+            if problem:
+                self._stop("safety", problem)
+                raise Stopped
         self._fetch_day_values()
         if mode == "live":
             self._scan_unknown_orders()
@@ -366,15 +400,19 @@ class Live:
     def _cancel_all(self) -> None:
         """봇의 끝나지 않은 주문마다 취소를 요청한다. 끝났는지는 다음 차례의 상세 조회로 정한다.
 
-        정지를 따르는 중이므로 토큰 오류도 출력만 한다. 이어지는 토큰 오류는 다음 차례의 상세 조회에서 안전 정지가 된다.
+        정지를 따르는 중이므로 토큰 오류도 출력만 하고, 새 정지로 그만두지 않는다. 이어지는 토큰 오류는 다음 차례의 상세 조회에서 안전 정지가 된다.
         """
-        with v5_book.connect(self.paths.live) as db:
-            pending = v5_book.orders(db, "status = 'open' AND kind != 'dry'")
-        for order in pending:
-            try:
-                self._cancel(order)
-            except toss.TossError as error:
-                print(f"취소 요청 오류: {error.code} {error.remote}")
+        hook = toss.INTERRUPT.set(None)
+        try:
+            with v5_book.connect(self.paths.live) as db:
+                pending = v5_book.orders(db, "status = 'open' AND kind != 'dry'")
+            for order in pending:
+                try:
+                    self._cancel(order)
+                except toss.TossError as error:
+                    print(f"취소 요청 오류: {error.code} {error.remote}")
+        finally:
+            toss.INTERRUPT.reset(hook)
 
     def _count_rejection(self, db: sqlite3.Connection, ledger_id: int) -> None:
         count = (v5_book.latch(db, ledger_id, "rejections", "") or 0) + 1
@@ -510,7 +548,12 @@ class Live:
             return "이 차례에 이미 낸 실주문이 있어 보내지 않음"
         with v5_book.connect(self.paths.live) as db:
             intent = v5_book.orders(db, "client_order_id = ?", (client_order_id,))[0]
-        self._send(intent)
+        try:
+            self._send(intent)
+        except toss.Interrupted:  # 주문 생성 요청을 보내기 전(또는 토큰이 끊겨 받지 않은 뒤)에 새 정지가 들어왔다. 토스에 생기지 않은 낼 주문이다
+            with v5_book.connect(self.paths.live) as db:
+                v5_book.update_order(db, client_order_id, status="abandoned", error="보내기 직전 정지")
+            raise
         return f"{why}: {symbol} {side} {count}주 {tif}"
 
     def _dry_fill(self, turn: Turn, client_order_id: str, ledger: dict, symbol: str, side: str, tif: str, count: int, why: str) -> str:
@@ -609,6 +652,14 @@ class Live:
     def _stops(self) -> list[dict]:
         with v5_book.connect(self.paths.live) as db:
             return v5_book.active_stops(db)
+
+    def _fresh_stop(self) -> bool:
+        """아직 따르지 않은(차례 사이에 취소를 하지 않은) v5-stop이 있는가. 차례 중의 토스 요청이 본다.
+
+        SPEC 4.6의 5초는 v5-stop의 것이다. 실행기가 스스로 건 정지(안전 정지, 수동 확인 필요, 누적 한도)는 그 차례에 이미 따르고,
+        점검 명령이 건 정지는 차례 사이에 따른다. 그래서 이 정지들은 차례를 그만두게 하지 않는다.
+        """
+        return any(stop["kind"] == "human" and stop["id"] not in self.handled_stops for stop in self._stops())
 
     def _sell_stop(self, stops: list[dict]) -> bool:
         """정지 중에 팔아도 되는가: sell 정지가 있고 manual 정지가 없다."""
