@@ -1,0 +1,101 @@
+{
+  "credentials": {"TOSS_INVEST_CLIENT_ID": "client-id-FAKE-1234", "TOSS_INVEST_CLIENT_SECRET": "client-secret-FAKE-5678"},
+  "account_no": "98765432101",
+  "now": "2026-11-10T08:00:00",
+  "tokens": {"stored": "token-STORED-aaaa", "issued": "token-ISSUED-bbbb", "other": "token-OTHER-cccc"},
+  "expires_in": 86400,
+  "client": [
+    {
+      "call": ["accounts"],
+      "response": {"result": [{"accountNo": "98765432101", "accountSeq": 3, "accountType": "BROKERAGE"}]},
+      "request": ["GET", "/api/v1/accounts", {}, null, null],
+      "returns": [{"seq": 3, "type": "BROKERAGE", "tail": "2101"}]
+    },
+    {
+      "call": ["holdings", 3],
+      "response": {"result": {"items": [{"symbol": "069500", "quantity": "5"}, {"symbol": "005930", "quantity": "2"}]}},
+      "request": ["GET", "/api/v1/holdings", {}, "3", null],
+      "returns": {"069500": 5, "114800": 0}
+    },
+    {
+      "call": ["buying_power", 3],
+      "response": {"result": {"currency": "KRW", "cashBuyingPower": "512345"}},
+      "request": ["GET", "/api/v1/buying-power", {"currency": "KRW"}, "3", null],
+      "returns": 512345
+    },
+    {
+      "call": ["commission_rate", 3],
+      "response": {"result": [{"marketCountry": "US", "commissionRate": "0.001"}, {"marketCountry": "KR", "commissionRate": "0.00015"}]},
+      "request": ["GET", "/api/v1/commissions", {}, "3", null],
+      "returns": "0.00015"
+    },
+    {
+      "call": ["price_limits", "069500"],
+      "response": {"result": {"upperLimitPrice": "116060", "lowerLimitPrice": "62500", "currency": "KRW"}},
+      "request": ["GET", "/api/v1/price-limits", {"symbol": "069500"}, null, null],
+      "returns": [116060, 62500]
+    },
+    {
+      "call": ["create_order", 3, "v5-20261110-0901-069500-B", "069500", "BUY", "DAY", 1],
+      "response": {"result": {"orderId": "ord-1", "clientOrderId": "v5-20261110-0901-069500-B"}},
+      "request": ["POST", "/api/v1/orders", {}, "3", {"clientOrderId": "v5-20261110-0901-069500-B", "symbol": "069500", "side": "BUY", "orderType": "MARKET", "timeInForce": "DAY", "quantity": "1"}],
+      "returns": "ord-1"
+    },
+    {
+      "call": ["create_order", 3, "v5-20261110-0855-114800-S", "114800", "SELL", "OPG", 40],
+      "response": {"result": {"orderId": "ord-2", "clientOrderId": "v5-20261110-0855-114800-S"}},
+      "request": ["POST", "/api/v1/orders", {}, "3", {"clientOrderId": "v5-20261110-0855-114800-S", "symbol": "114800", "side": "SELL", "orderType": "MARKET", "timeInForce": "OPG", "quantity": "40"}],
+      "returns": "ord-2"
+    },
+    {
+      "call": ["cancel_order", 3, "ord-1"],
+      "response": {"result": {"orderId": "ord-1"}},
+      "request": ["POST", "/api/v1/orders/ord-1/cancel", {}, "3", null],
+      "returns": null
+    },
+    {
+      "call": ["order", 3, "ord-1"],
+      "response": {"result": {"orderId": "ord-1", "symbol": "069500", "side": "BUY", "status": "PARTIAL_FILLED", "quantity": "3", "execution": {"filledQuantity": "2", "averageFilledPrice": "89280", "filledAmount": "178560", "commission": null, "tax": null}}},
+      "request": ["GET", "/api/v1/orders/ord-1", {}, "3", null],
+      "returns": {"status": "PARTIAL_FILLED", "symbol": "069500", "side": "BUY", "quantity": 3, "filled_quantity": 2, "filled_amount": "178560", "average_price": "89280", "commission": null, "tax": null}
+    },
+    {
+      "call": ["open_orders", 3, "114800"],
+      "response": {"result": {"orders": [{"orderId": "ord-9", "symbol": "114800", "side": "SELL", "quantity": "10", "status": "PENDING"}], "nextCursor": null, "hasNext": false}},
+      "request": ["GET", "/api/v1/orders", {"status": "OPEN", "symbol": "114800"}, "3", null],
+      "returns": [{"order_id": "ord-9", "side": "SELL", "quantity": 10, "status": "PENDING"}]
+    }
+  ],
+  "token_cases": {
+    "fresh": {"expires_in_minutes": 11, "issues": 0},
+    "stale": {"expires_in_minutes": 10, "issues": 1}
+  },
+  "errors": [
+    {"response": "network", "class": "retry", "code": "V1_TOSS_UNAVAILABLE"},
+    {"response": [500, {"error": {"code": "internal-error", "message": "x"}}], "class": "retry", "code": "V1_TOSS_UNAVAILABLE"},
+    {"response": [500, {"error": {"code": "maintenance", "message": "x", "data": {"retryAfterSeconds": 600}}}], "class": "retry", "code": "V1_TOSS_UNAVAILABLE"},
+    {"response": [429, {"error": {"code": "rate-limited", "message": "x"}}, {"Retry-After": "7"}], "class": "retry", "code": "V5_TOSS_RATE_LIMITED", "retry_after": 7},
+    {"response": [409, {"error": {"code": "request-in-progress", "message": "x"}}], "class": "retry", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [403, {"error": {"code": "forbidden", "message": "x"}}], "class": "stop", "code": "V1_IP_NOT_ALLOWED"},
+    {"response": [422, {"error": {"code": "prerequisite-required", "message": "x"}}], "class": "stop", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [422, {"error": {"code": "investor-exchange-not-integrated", "message": "x"}}], "class": "stop", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [422, {"error": {"code": "account-restricted", "message": "x"}}], "class": "stop", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [400, {"error": {"code": "account-header-required", "message": "x"}}], "class": "stop", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [422, {"error": {"code": "idempotency-key-conflict", "message": "x"}}], "class": "stop", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [409, {"error": {"code": "opposite-pending-order-exists", "message": "x"}}], "class": "stop", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [422, {"error": {"code": "insufficient-sellable-quantity", "message": "x"}}], "class": "stop", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [200, {"result": {"clientOrderId": "x"}}], "class": "stop", "code": "V5_TOSS_RESPONSE_INVALID"},
+    {"response": [422, {"error": {"code": "insufficient-buying-power", "message": "x"}}], "class": "reject", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [422, {"error": {"code": "order-hours-closed", "message": "x"}}], "class": "reject", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [422, {"error": {"code": "stock-restricted", "message": "x"}}], "class": "reject", "code": "V1_TOSS_RESPONSE_INVALID"},
+    {"response": [400, {"error": {"code": "invalid-request", "message": "x"}}], "class": "reject", "code": "V1_TOSS_RESPONSE_INVALID"}
+  ],
+  "cancel_responses": [
+    [200, {"result": {"orderId": "ord-1"}}],
+    [409, {"error": {"code": "already-filled", "message": "x"}}],
+    [409, {"error": {"code": "already-canceled", "message": "x"}}],
+    [422, {"error": {"code": "cancel-restricted", "message": "x"}}],
+    [422, {"error": {"code": "order-hours-closed", "message": "x"}}]
+  ],
+  "final": {"PENDING": false, "PENDING_CANCEL": false, "PENDING_REPLACE": false, "PARTIAL_FILLED": false, "CANCEL_REJECTED": false, "REPLACE_REJECTED": false, "REPLACED": false, "FILLED": true, "CANCELED": true, "REJECTED": true}
+}

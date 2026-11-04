@@ -111,7 +111,7 @@ def fetch_bars(root: Path, day: str, seconds: float) -> dict[str, list[market_da
     def work() -> None:
         try:
             with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
-                token = toss.issue_token(http, *toss.read_credentials(root))
+                token = toss.SharedToken(http, toss.read_credentials(root), root / "data" / "toss" / "token.json")
                 tomorrow = (Date.fromisoformat(day) + timedelta(days=1)).isoformat()
                 bars = {}
                 for symbol in SYMBOLS:

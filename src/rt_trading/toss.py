@@ -1,7 +1,11 @@
-"""토스 Open API 토큰 발급과 캔들 조회."""
+"""토스 Open API 토큰 발급과 캔들 조회, 서버의 토스 호출이 함께 쓰는 토큰(v5 PRD 01)."""
 
+import fcntl
+import json
 import os
 import time
+from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,15 +16,83 @@ KST = timezone(timedelta(hours=9))
 IP_HELP = "토스 WTS의 설정 > Open API > 허용 IP 관리에 이 컴퓨터의 공인 IP를 등록해야 한다"
 RETRY_WAITS = (1, 2, 4)  # 5xx·네트워크 오류 뒤 다시 보내기 전에 기다리는 초
 PRICE_KEYS = ("openPrice", "highPrice", "lowPrice", "closePrice", "volume")
+TOKEN_ERRORS = ("token-revoked", "expired-token", "invalid-token")
+TOKEN_MARGIN = timedelta(minutes=10)  # 만료까지 이보다 적게 남은 토큰은 새로 받는다
 _sleep = time.sleep  # acceptance가 기다린 시간을 기록하려고 바꿔 끼운다
 
 
 class TossError(Exception):
-    """오류 코드와 설명. 인증 정보와 토큰은 담지 않는다."""
+    """오류 코드와 설명. 인증 정보와 토큰은 담지 않는다.
 
-    def __init__(self, code: str, message: str) -> None:
+    remote는 응답 본문의 토스 오류 코드, status는 HTTP 상태, retry_after는 429의 Retry-After 초다. 없으면 None이다.
+    """
+
+    def __init__(self, code: str, message: str, remote: str | None = None, status: int | None = None, retry_after: float | None = None) -> None:
         super().__init__(f"{code}: {message}")
-        self.code = code
+        self.code, self.remote, self.status, self.retry_after = code, remote, status, retry_after
+
+
+class SharedToken:
+    """서버의 모든 토스 호출이 함께 쓰는 토큰. 토큰 파일 하나를 잠금 파일로 지킨다(v5 SPEC 5.3).
+
+    str()로 값을 꺼낸다. 파일의 토큰이 만료까지 10분보다 많이 남았으면 그것을 쓰고, 아니면 잠금 안에서 다시 확인한 뒤 새로 받아 저장한다.
+    """
+
+    def __init__(self, http: httpx.Client, credentials: tuple[str, str], path: Path, clock: Callable[[], datetime] = lambda: datetime.now(KST)) -> None:
+        self.http, self.credentials, self.path, self.clock = http, credentials, path, clock
+        self.value: str | None = None
+
+    def __str__(self) -> str:
+        if self.value is None:
+            saved = self._saved()
+            if saved is None:
+                with self._lock():
+                    saved = self._saved() or self._issue()
+            self.value = saved
+        return self.value
+
+    def renew(self) -> None:
+        """토큰 오류 뒤에 부른다. 파일의 토큰이 쓰던 것과 다르고 아직 쓸 수 있으면 그것으로, 아니면 새로 받아 바꾼다."""
+        stale = self.value
+        with self._lock():
+            saved = self._saved()
+            self.value = saved if saved is not None and saved != stale else self._issue()
+
+    def _saved(self) -> str | None:
+        """파일의 토큰. 없거나, 읽을 수 없거나, 만료까지 10분 이하로 남았으면 None이다."""
+        try:
+            content = json.loads(self.path.read_text(encoding="utf-8"))
+            if datetime.fromisoformat(content["expires_at"]) - self.clock() > TOKEN_MARGIN:
+                return str(content["access_token"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        return None
+
+    def _issue(self) -> str:
+        """토큰을 받아 임시 파일에 쓴 뒤 바꿔 끼운다. 잠금 안에서만 부른다."""
+        issued, content = self.clock(), _token_response(self.http, *self.credentials)
+        try:
+            expires_at = issued + timedelta(seconds=int(content["expires_in"]))
+        except (KeyError, TypeError, ValueError) as error:
+            raise TossError("V1_TOSS_RESPONSE_INVALID", "토큰 응답에 expires_in이 없다") from error
+        temp = self.path.with_name(self.path.name + ".tmp")
+        descriptor = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump({"access_token": content["access_token"], "expires_at": expires_at.isoformat()}, file)
+        os.chmod(temp, 0o600)
+        os.replace(temp, self.path)
+        return content["access_token"]
+
+    @contextmanager
+    def _lock(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.path.parent, 0o700)
+        with open(self.path.with_name("token.lock"), "a") as file:
+            fcntl.flock(file, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(file, fcntl.LOCK_UN)
 
 
 def read_credentials(root: Path) -> tuple[str, str]:
@@ -38,6 +110,11 @@ def read_credentials(root: Path) -> tuple[str, str]:
 
 def issue_token(http: httpx.Client, client_id: str, client_secret: str) -> str:
     """토큰을 발급한다. 같은 키로 먼저 발급된 토큰은 끊긴다."""
+    return _token_response(http, client_id, client_secret)["access_token"]
+
+
+def _token_response(http: httpx.Client, client_id: str, client_secret: str) -> dict:
+    """토큰 발급 응답 본문. access_token이 없으면 V1_TOSS_RESPONSE_INVALID다."""
     response = _send(
         http,
         "POST",
@@ -45,22 +122,24 @@ def issue_token(http: httpx.Client, client_id: str, client_secret: str) -> str:
         data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
     )
     try:
-        return response.json()["access_token"]
+        content = response.json()
+        return content | {"access_token": content["access_token"]}
     except (ValueError, KeyError, TypeError) as error:
         raise TossError("V1_TOSS_RESPONSE_INVALID", "토큰 응답에 access_token이 없다") from error
 
 
 def candles(
-    http: httpx.Client, token: str, symbol: str, interval: str, adjusted: bool, since: str | None = None
+    http: httpx.Client, token: "str | SharedToken", symbol: str, interval: str, adjusted: bool, since: str | None = None
 ) -> list[dict]:
     """과거로 넘기며 캔들을 받는다. 최신 봉이 먼저 온다.
 
     받은 봉이 없거나, result.nextBefore가 없거나, since(YYYY-MM-DD)보다 앞선 봉이 나오면 멈춘다.
     """
     params = {"symbol": symbol, "interval": interval, "count": 200, "adjusted": "true" if adjusted else "false"}
+    shared = token if isinstance(token, SharedToken) else None
     received = []
     while True:
-        response = _send(http, "GET", "/api/v1/candles", params=params, headers={"Authorization": f"Bearer {token}"})
+        response = _send(http, "GET", "/api/v1/candles", shared, params=params, headers={"Authorization": f"Bearer {token}"})
         try:
             result = response.json()["result"]
             page, next_before = result["candles"], result.get("nextBefore")
@@ -112,42 +191,69 @@ def _kst(timestamp: str) -> datetime:
     return datetime.fromisoformat(timestamp).astimezone(KST)
 
 
-def _send(http: httpx.Client, method: str, path: str, **kwargs) -> httpx.Response:
+def _send(
+    http: httpx.Client, method: str, path: str, token: SharedToken | None = None, retry: bool = True, **kwargs
+) -> httpx.Response:
     """요청을 보내고 오류를 코드로 나눈다.
 
-    429는 Retry-After초 기다려 다시 보내고, 5xx와 네트워크 오류는 1·2·4초 뒤 세 번까지 다시 보낸다.
+    retry면 429는 Retry-After초 기다려 다시 보내고, 5xx와 네트워크 오류는 1·2·4초 뒤 세 번까지 다시 보낸다.
+    token(SharedToken)을 주면 보낼 때마다 그 값을 Authorization 헤더에 넣고, 토큰 오류를 받으면 토큰을 바꿔 한 번 다시 보낸다.
+    retry가 거짓이면 한 번만 보낸다(v5 주문 생성). 토큰 오류면 토큰을 바꿔 두기만 하고 오류를 낸다.
     """
-    waits = iter(RETRY_WAITS)
+    waits, renewed = iter(RETRY_WAITS), False
     while True:
+        if token is not None:
+            kwargs["headers"] = {**kwargs.get("headers", {}), "Authorization": f"Bearer {token}"}
         _sleep(1 / 15)  # 초당 15회 이하
         try:
             response = http.request(method, path, **kwargs)
             failure = f"HTTP {response.status_code}" if response.status_code >= 500 else None
         except httpx.TransportError as error:
-            failure = type(error).__name__
+            response, failure = None, type(error).__name__
         if failure:
-            wait = next(waits, None)
+            wait = next(waits, None) if retry else None
             if wait is None:
-                raise TossError("V1_TOSS_UNAVAILABLE", f"세 번 다시 보내도 실패했다({failure})")
+                status = response.status_code if response is not None else None
+                message = f"세 번 다시 보내도 실패했다({failure})" if retry else f"보내지 못했다({failure})"
+                raise TossError("V1_TOSS_UNAVAILABLE", message, _remote(response) if response is not None else None, status)
             _sleep(wait)
             continue
         if response.status_code == 429:
-            _sleep(float(response.headers.get("Retry-After", 1)))
+            seconds = float(response.headers.get("Retry-After", 1))
+            if not retry:
+                raise TossError("V5_TOSS_RATE_LIMITED", f"요청 한도를 넘었다({seconds:g}초 뒤 다시)", _remote(response), 429, seconds)
+            _sleep(seconds)
             continue
         if response.status_code == 401:
-            error = _error(response)
-            if isinstance(error, dict) and error.get("code") == "token-revoked":
+            remote = _remote(response)
+            if token is not None and remote in TOKEN_ERRORS and not renewed:
+                token.renew()
+                renewed = True
+                if retry:
+                    continue
+            if remote == "token-revoked":
                 raise TossError(
                     "V1_TOKEN_REVOKED",
-                    f"{_describe(response)}. 같은 토스 키를 쓰는 다른 프로그램이 토큰을 새로 받았을 수 있다."
-                    " 재발급하지 않고 멈춘다",
+                    f"{_describe(response)}. 토큰을 바꿔 다시 보냈는데도 끊겼다"
+                    if renewed and retry
+                    else f"{_describe(response)}. 같은 토스 키를 쓰는 다른 프로그램이 토큰을 새로 받았을 수 있다. 재발급하지 않고 멈춘다",
+                    remote,
+                    401,
                 )
-            raise TossError("V1_TOKEN_INVALID", _describe(response))
+            raise TossError("V1_TOKEN_INVALID", _describe(response), remote, 401)
         if response.status_code == 403:
-            raise TossError("V1_IP_NOT_ALLOWED", f"{_describe(response)}. {IP_HELP}")
+            raise TossError("V1_IP_NOT_ALLOWED", f"{_describe(response)}. {IP_HELP}", _remote(response), 403)
         if response.is_error:
-            raise TossError("V1_TOSS_RESPONSE_INVALID", _describe(response))
+            raise TossError("V1_TOSS_RESPONSE_INVALID", _describe(response), _remote(response), response.status_code)
         return response
+
+
+def _remote(response: httpx.Response) -> str | None:
+    """응답 본문의 토스 오류 코드(Open API는 error.code, 토큰 발급은 OAuth2 error 문자열)."""
+    error = _error(response)
+    if isinstance(error, dict):
+        return error.get("code")
+    return error if isinstance(error, str) else None
 
 
 def _error(response: httpx.Response) -> object:

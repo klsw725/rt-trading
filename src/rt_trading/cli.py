@@ -49,7 +49,7 @@ SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
 
 
 def main() -> None:
-    from rt_trading import acceptance  # acceptance가 이 모듈의 run_fetch를 쓰므로 여기서 불러온다
+    from rt_trading import acceptance, v5_acceptance  # 두 acceptance가 이 모듈을 쓰므로 여기서 불러온다
 
     parser = argparse.ArgumentParser(prog="rt-trading")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -78,6 +78,8 @@ def main() -> None:
     v4_checks = commands.add_parser("v4-acceptance", help="v4 acceptance를 네트워크 없이 실행한다")
     v4_checks.add_argument("--prd", choices=sorted(v4_acceptance.CASES))
     commands.add_parser("web-acceptance", help="현황 웹페이지 모양(web SPEC) acceptance를 네트워크 없이 실행한다")
+    v5_checks = commands.add_parser("v5-acceptance", help="v5 acceptance를 네트워크 없이 실행한다")
+    v5_checks.add_argument("--prd", choices=sorted(v5_acceptance.CASES))
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -111,17 +113,24 @@ def main() -> None:
         sys.exit(v4_acceptance.run(args.prd))
     if args.command == "web-acceptance":
         sys.exit(web_acceptance.run())
+    if args.command == "v5-acceptance":
+        sys.exit(v5_acceptance.run(args.prd))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
 
 
 def fetch() -> int:
     with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
-        return run_fetch(http, toss.read_credentials(ROOT), DB_PATH, lambda: datetime.now(toss.KST))
+        return run_fetch(http, toss.read_credentials(ROOT), DB_PATH, lambda: datetime.now(toss.KST), shared_token(http))
 
 
 def fetch_us() -> int:
     with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
-        return v3_us.run(http, toss.read_credentials(ROOT), V3_PATHS.us, lambda: datetime.now(toss.KST))
+        return v3_us.run(http, toss.read_credentials(ROOT), V3_PATHS.us, lambda: datetime.now(toss.KST), shared_token(http))
+
+
+def shared_token(http: httpx.Client) -> toss.SharedToken:
+    """서버의 모든 토스 호출이 함께 쓰는 토큰(v5 SPEC 5.3)."""
+    return toss.SharedToken(http, toss.read_credentials(ROOT), ROOT / "data" / "toss" / "token.json")
 
 
 def fetch_market(seconds: float) -> int:
@@ -196,14 +205,16 @@ def run_backtest(db_path: Path, report_dir: Path, clock: Callable[[], datetime])
     return 0
 
 
-def run_fetch(http: httpx.Client, credentials: tuple[str, str], db_path: Path, clock: Callable[[], datetime]) -> int:
+def run_fetch(
+    http: httpx.Client, credentials: tuple[str, str], db_path: Path, clock: Callable[[], datetime], token: toss.SharedToken | None = None
+) -> int:
     """두 종목의 1분봉 원가격과 일봉 원가격·수정 가격을 모두 받아 검사한 뒤 한 번에 저장한다.
 
-    하나라도 실패하면 오류 코드를 출력하고 저장하지 않은 채 1을 돌려준다.
+    하나라도 실패하면 오류 코드를 출력하고 저장하지 않은 채 1을 돌려준다. token을 주지 않으면 토큰을 새로 받는다.
     """
     today = clock().date().isoformat()
     try:
-        token = toss.issue_token(http, *credentials)
+        token = token or toss.issue_token(http, *credentials)
         minute, daily = [], []
         for symbol in SYMBOLS:
             minute += toss.minute_rows(symbol, toss.candles(http, token, symbol, "1m", False, SINCE), SINCE, today)

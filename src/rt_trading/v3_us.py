@@ -17,14 +17,16 @@ TABLE = "symbol TEXT NOT NULL, date TEXT NOT NULL, adj_close TEXT NOT NULL, PRIM
 MIN_ROWS = 21  # 20거래일 수익률에 드는 일봉 수
 
 
-def run(http: httpx.Client, credentials: tuple[str, str], path: Path, clock: Callable[[], datetime]) -> int:
+def run(
+    http: httpx.Client, credentials: tuple[str, str], path: Path, clock: Callable[[], datetime], token: toss.SharedToken | None = None
+) -> int:
     """종목마다 수정 일봉을 한 번(200개) 받아, 실행한 날 전의 일봉만 한 트랜잭션으로 저장한다.
 
-    하나라도 실패하면 오류 코드를 출력하고 저장하지 않은 채 1을 돌려준다.
+    하나라도 실패하면 오류 코드를 출력하고 저장하지 않은 채 1을 돌려준다. token을 주지 않으면 토큰을 새로 받는다.
     """
     today = clock().date().isoformat()
     try:
-        token = toss.issue_token(http, *credentials)
+        token = token or toss.issue_token(http, *credentials)
         received = {symbol: toss.candles(http, token, symbol, "1d", True, today) for symbol in SYMBOLS}  # since가 오늘이면 첫 쪽에서 멈춘다
     except toss.TossError as error:
         print(error)
