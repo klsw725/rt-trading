@@ -148,6 +148,8 @@ def case_shared_token() -> None:
         path = Path(name) / "data" / "toss" / "token.json"
         for case, item in fixture["token_cases"].items():
             _token_file(path, tokens["stored"], now + timedelta(minutes=item["expires_in_minutes"]))
+            os.chmod(path, 0o644)  # 다른 쪽이 넓은 권한으로 만든 파일과 폴더
+            os.chmod(path.parent, 0o755)
             fake = FakeToss({candles: [page]}, tokens["issued"], fixture["expires_in"])
             with httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(fake)) as http:
                 shared = toss.SharedToken(http, tuple(fixture["credentials"].values()), path, lambda: now)
@@ -155,6 +157,7 @@ def case_shared_token() -> None:
             assert fake.count("/oauth2/token") == item["issues"], (case, fake.requests)
             used = tokens["stored"] if item["issues"] == 0 else tokens["issued"]
             assert fake.requests[-1]["headers"]["authorization"] == f"Bearer {used}", (case, fake.requests[-1])
+            assert path.stat().st_mode & 0o777 == 0o600 and path.parent.stat().st_mode & 0o777 == 0o700, (case, oct(path.stat().st_mode), oct(path.parent.stat().st_mode))
         saved = json.loads(path.read_text(encoding="utf-8"))
         assert saved == {"access_token": tokens["issued"], "expires_at": (now + timedelta(seconds=fixture["expires_in"])).isoformat()}, saved
         assert path.stat().st_mode & 0o777 == 0o600 and path.parent.stat().st_mode & 0o777 == 0o700, (oct(path.stat().st_mode), oct(path.parent.stat().st_mode))
@@ -436,9 +439,11 @@ class _Broker:
         self.posts: list[list] = []
         self.cancels: list[str] = []
         self.on_post: list = []
+        self.seen: list[tuple[str, str, str | None]] = []  # 요청마다 (방법, 경로, 계좌 헤더)
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path, method = request.url.path, request.method
+        self.seen.append((method, path, request.headers.get("x-tossinvest-account")))
         if path == "/api/v1/accounts":
             return httpx.Response(200, json={"result": [{"accountNo": "98765432101", "accountSeq": 3, "accountType": "BROKERAGE"}]})
         if path == "/api/v1/holdings":
@@ -639,6 +644,20 @@ def _orders(case: _LiveCase, where: str = "1") -> list[dict]:
         return v5_book.orders(db, where)
 
 
+def _stop_on_scan(case: _LiveCase, skip: int = 0) -> httpx.Client:
+    """보내기 직전에 진행 중 주문 목록을 조회하는 사이에 v5-stop이 들어오는 가짜 토스. 앞선 목록 조회 skip번은 그냥 지나간다."""
+    scans = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/api/v1/orders":
+            scans.append(request)
+            if len(scans) == skip + 1:
+                _quiet(v5_live.stop, case.paths, False, case.clock)
+        return case.broker(request)
+
+    return httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(handler))
+
+
 def case_live_duplicates() -> None:
     fixture = _prd03()["scenarios"]
     case = _scenario("lost")
@@ -675,6 +694,18 @@ def case_live_duplicates() -> None:
     case.clock.now += timedelta(seconds=10)
     case.live._between()
     assert len(case.broker.posts) == 1 and {stop["kind"] for stop in case.stops()} == {"human", "manual"}, ("다시 보내기 전 정지", case.stops())
+
+    case = _scenario("unread")
+    case.goal = v5_target.Target("069500", None, {})
+    _quiet(case.turn, "09:01")
+    assert _orders(case)[0]["status"] == "unknown" and [stop["kind"] for stop in case.stops()] == ["manual"], ("성공 응답을 읽지 못한 주문", _orders(case), case.stops())
+
+    case = _scenario("lost")
+    case.goal = v5_target.Target("069500", None, {})
+    case.turn("closing")
+    case.clock.now = _time(f"{case.day}T15:45:00")
+    case.live = case.executor()
+    assert _quiet(case.live.run) == 0 and [stop["kind"] for stop in case.stops()] == ["manual"] and case.live._day_record()["ended"] == 1, ("c + 10분 뒤에 켜짐", case.stops())
 
     case = _scenario("duplicate_turn")
     case.goal = v5_target.Target("069500", None, {})
@@ -717,6 +748,47 @@ def case_live_stops() -> None:
     case.live.target = stop_then_target
     with contextlib.redirect_stdout(io.StringIO()):
         assert case.turn("09:01") == [], "주문 직전 정지"
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+    case.live.http = _stop_on_scan(case)
+    assert _quiet(case.turn, "09:01") == [], "진행 중 목록을 보는 사이에 들어온 정지"
+
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+
+    def stop_while_waiting(day: str) -> dict:
+        if not case.stops():
+            _quiet(v5_live.stop, case.paths, False, case.clock)
+        return {}
+
+    case.live.bars = stop_while_waiting
+    assert _quiet(case.turn, "09:01") == [] and case.clock.now <= _time(f"{case.day}T09:01:15"), ("봉을 기다리는 사이에 들어온 정지를 5초 안에 따르지 않음", case.clock.now)
+
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+
+    def revoked(day: str) -> dict:
+        raise toss.TossError("V1_TOKEN_REVOKED", "토큰을 바꿔 다시 보냈는데도 끊겼다", "token-revoked", 401)
+
+    case.live.bars = revoked
+    assert _quiet(case.turn, "09:01") == [] and [stop["kind"] for stop in case.stops()] == ["safety"], ("토큰을 바꿔도 이어지는 토큰 오류", case.stops())
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target(None, "limits_missing", {})
+    with v5_book.connect(case.paths.live) as db:
+        db.execute("UPDATE days SET limits = NULL WHERE date = ?", (case.day,))
+    revoked_limits = lambda request: httpx.Response(401, json={"error": {"code": "token-revoked"}}) if request.url.path == "/api/v1/price-limits" else case.broker(request)
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(revoked_limits))
+    assert _quiet(case.turn, "09:01") == [] and [stop["kind"] for stop in case.stops()] == ["safety"], ("상·하한가 받기의 토큰 오류", case.stops())
+    partial = _prd03()["scenarios"]["partial"]
+    case = _scenario("partial")
+    case.goal = v5_target.Target("069500", None, {})
+    _quiet(case.turn, "09:01")
+    case.broker.fill(*partial["fill"])
+    revoked_cancel = lambda request: httpx.Response(401, json={"error": {"code": "token-revoked"}}) if request.url.path.endswith("/cancel") else case.broker(request)
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(revoked_cancel))
+    assert _quiet(case.turn, "09:02") == [] and [stop["kind"] for stop in case.stops()] == ["safety"], ("취소의 토큰 오류", case.stops())
+    _quiet(case.live._between)  # 차례 사이에 정지를 따르는 취소가 토큰 오류를 받아도 실행기가 끝나지 않는다
+
     case = _scenario("lost", broker={"post": []})
     case.goal = v5_target.Target("069500", None, {})
     case.turn("09:01")
@@ -766,6 +838,13 @@ def case_live_fills() -> None:
     with v5_book.connect(case.paths.live) as db:
         after = db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
     assert list(case.balance()) == [item["after_fee"]["cash"], item["after_fee"]["holdings"]] and after == entries + 1, (case.balance(), entries, after)
+    case.broker.orders["ord-1"]["filledQuantity"] = str(item["stale_fill"])  # 앞서 반영한 체결 수량보다 적은 늦은 상세
+    try:
+        case.live._apply(_orders(case)[0])
+        raise AssertionError("체결 수량이 줄어든 상세를 장부에 반영함")
+    except v5_live.Stopped:
+        pass
+    assert list(case.balance()) == [item["after_fee"]["cash"], item["after_fee"]["holdings"]] and [stop["kind"] for stop in case.stops()] == ["safety"], (case.balance(), case.stops())
 
     item = fixture["auction"]
     case = _scenario("auction")
@@ -783,6 +862,20 @@ def case_live_fills() -> None:
     case.live._between()
     case.turn("end")
     assert case.broker.cancels == [], "종가 차례 주문을 마감 전에 취소함"
+    case = _scenario("auction")
+    case.goal = v5_target.Target("069500", None, {})
+    case.turn("closing")
+    case.broker.fill(*item["closing_fill"])
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        case.clock.now += timedelta(seconds=1)  # 끝 차례의 조회 응답이 1초씩 걸린다
+        return case.broker(request)
+
+    case.live.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(slow))
+    case.turn("end")
+    with v5_book.connect(case.paths.live) as db:
+        held = v5_book.balance(db, v5_book.ledger(db, "live")["id"], f"{case.day}T15:40:00+09:00")[1]
+    assert held == item["close_holdings"], ("끝 차례에 반영한 체결이 그날 마감(c + 10분까지)의 장부에 없음", held)
 
     case = _scenario("replaced")
     case.goal = v5_target.Target("069500", None, {})
@@ -844,7 +937,7 @@ def case_live_resume() -> None:
 
     case = _scenario("new_ledger", config=_prd03()["scenarios"]["new_ledger"]["config"])
     with v5_book.connect(case.paths.live) as db:
-        v5_book.add_intent(db, {"client_order_id": "v5-x", "kind": "live", "ledger_id": 1, "date": case.day, "turn": "09:01", "symbol": "069500", "side": "BUY", "tif": "DAY", "quantity": 1, "created_at": case.clock().isoformat()})
+        v5_book.add_intent(db, {"client_order_id": "v5-x", "kind": "live", "ledger_id": 1, "account_seq": 3, "date": case.day, "turn": "09:01", "symbol": "069500", "side": "BUY", "tif": "DAY", "quantity": 1, "created_at": case.clock().isoformat()})
         v5_book.update_order(db, "v5-x", status="unknown")
         v5_book.add_stop(db, "manual", "hold", "수동 확인 필요", case.clock())
     assert _quiet(v5_live.resume, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 0 and not case.stops(), case.stops()
@@ -856,6 +949,11 @@ def case_live_resume() -> None:
     assert _quiet(v5_live.resume, other.paths, other.http, "token-x", other.clock, other.clock.sleep, True) == 1, "오늘과 다른 계좌로 새 장부"
     busy = _scenario("new_ledger", broker={"holdings": {"069500": 1, "114800": 0}})
     assert _quiet(v5_live.resume, busy.paths, busy.http, "token-x", busy.clock, busy.clock.sleep, True) == 1, "보유가 있는데 새 장부"
+    scenarios = _prd03()["scenarios"]
+    practice = _scenario("check", config=scenarios["check"]["config"], broker=scenarios["foreign"]["broker"])
+    with v5_book.connect(practice.paths.live) as db:
+        v5_book.add_stop(db, "safety", "hold", "봇이 기록하지 않은 대기 주문", practice.clock())
+    assert _quiet(v5_live.resume, practice.paths, practice.http, "token-x", practice.clock, practice.clock.sleep, False) == 1 and practice.stops(), "실장부 없이 모르는 대기 주문이 있는데 풂"
 
 
 def case_live_practice() -> None:
@@ -883,6 +981,11 @@ def case_live_practice() -> None:
     with v5_book.connect(case.paths.live) as db:
         ledger, record = v5_book.ledger(db, "live"), v5_book.day(db, case.day)
     assert ledger is None and record["mode"] == "dry" and [stop["kind"] for stop in case.stops()] == ["safety"], (ledger, record)
+    case = _scenario("create")
+    _quiet(v5_live.stop, case.paths, False, case.clock)
+    _quiet(case.turn, "start")
+    with v5_book.connect(case.paths.live) as db:
+        assert v5_book.ledger(db, "live") is None and v5_book.day(db, case.day)["mode"] == "dry", "정지 중에 실장부를 만듦"
 
     case = _scenario("guard", config=_prd03()["scenarios"]["guard"]["config"])
     _quiet(case.turn, "start")
@@ -946,6 +1049,67 @@ def case_live_check() -> None:
         fcntl.flock(held, fcntl.LOCK_EX)
         assert _quiet(v5_live.check, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 1 and case.broker.posts == []
         fcntl.flock(held, fcntl.LOCK_UN)
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["intraday_at"])
+    http = _stop_on_scan(case, len(v5_target.SYMBOLS))  # 점검 조건을 보는 두 종목 목록 조회 뒤, 보내기 직전 조회에서 정지가 들어온다
+    assert _quiet(v5_live.check, case.paths, http, "token-x", case.clock, case.clock.sleep, True) == 1 and case.broker.posts == [], "목록 조회 사이 정지"
+
+    case = _scenario("check", config=item["config"] | {"account_seq": item["other_account"]})
+    case.clock.now = _time(item["intraday_at"])
+    assert _quiet(v5_live.check, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 1 and case.broker.posts == [], "BROKERAGE가 아닌 계좌"
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["intraday_at"])
+    case.open_day(case.day)
+    case.paths.config.write_text(json.dumps(case.config | {"account_seq": item["other_account"]}), encoding="utf-8")
+    assert _quiet(v5_live.check, case.paths, _filling(case), "token-x", case.clock, case.clock.sleep, True) == 0
+    assert [account for method, path, account in case.broker.seen if (method, path) == ("POST", "/api/v1/orders")] == ["3", "3"], ("그날 중에 바꾼 계좌로 점검", case.broker.seen)
+    assert {account for _, _, account in case.broker.seen if account is not None} == {"3"}, ("그날 중에 바꾼 계좌로 조회", case.broker.seen)
+
+    case = _scenario("check", config=item["config"], broker={"post": ["network"]})
+    case.clock.now = _time(item["intraday_at"])
+    assert _quiet(v5_live.check, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 1
+    case.paths.config.write_text(json.dumps(case.config | {"account_seq": item["other_account"]}), encoding="utf-8")
+    _quiet(case.turn, "start")
+    _quiet(case.live._between)
+    case.broker.fill(*item["late_fill"])
+    _quiet(case.turn, "end")
+    with v5_book.connect(case.paths.live) as db:
+        entries = db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+    sent = [account for method, path, account in case.broker.seen if (method, path) == ("POST", "/api/v1/orders") or path.startswith("/api/v1/orders/")]
+    assert sent == ["3", "3", "3"] and entries == 0 and case.live._day_record()["ended"] == 1, ("점검 주문을 다른 계좌로 다시 보내거나 조회하거나 장부에 넣음", sent, entries)
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["pre_open_at"])
+
+    def filled_cancel(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/cancel"):
+            case.broker.fill(*item["filled_cancel"])  # 취소가 닿기 전에 1주가 체결됐다
+        return case.broker(request)
+
+    http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(filled_cancel))
+    assert _quiet(v5_live.check, case.paths, http, "token-x", case.clock, case.clock.sleep, True) == 1, "1주 체결된 개장 전 점검 주문을 취소 확인으로 봄"
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["pre_open_at"])
+    revoked_cancel = lambda request: httpx.Response(401, json={"error": {"code": "token-revoked"}}) if request.url.path.endswith("/cancel") else case.broker(request)
+    http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(revoked_cancel))
+    assert _quiet(v5_live.check, case.paths, http, "token-x", case.clock, case.clock.sleep, True) == 1 and [stop["kind"] for stop in case.stops()] == ["safety"], ("점검 취소의 토큰 오류", case.stops())
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["intraday_at"])
+
+    def other_quantity() -> None:
+        case.broker.orders[case.broker.clients[item["intraday_posts"][0][0]]]["quantity"] = 2  # 낸 주문과 수량이 다른 상세
+
+    assert _quiet(v5_live.check, case.paths, _filling(case, other_quantity), "token-x", case.clock, case.clock.sleep, True) == 1
+    assert [post[2] for post in case.broker.posts] == ["BUY"] and [stop["kind"] for stop in case.stops()] == ["safety"], ("낸 주문과 다른 점검 주문 상세", case.broker.posts, case.stops())
+
+    case = _scenario("check", config=item["config"], broker=_prd03()["scenarios"]["unread"]["broker"])
+    case.clock.now = _time(item["intraday_at"])
+    assert _quiet(v5_live.check, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 1
+    assert _orders(case)[0]["status"] == "unknown" and [stop["kind"] for stop in case.stops()] == ["manual"], ("성공 응답을 읽지 못한 점검 주문", _orders(case), case.stops())
 
 
 def case_live_reasons() -> None:
@@ -1085,7 +1249,7 @@ def case_run_report() -> None:
     with v5_book.connect(live_paths.live) as db:
         ledger = v5_book.create_ledger(db, "live", 3, item["ledger"]["start_cash"], datetime.fromisoformat(item["ledger"]["created_at"]))
         for order in item["orders"]:
-            v5_book.add_intent(db, {key: order[key] for key in ("client_order_id", "date", "turn", "symbol", "side", "quantity")} | {"kind": "live", "ledger_id": ledger, "tif": "DAY", "created_at": order["at"]})
+            v5_book.add_intent(db, {key: order[key] for key in ("client_order_id", "date", "turn", "symbol", "side", "quantity")} | {"kind": "live", "ledger_id": ledger, "account_seq": 3, "tif": "DAY", "created_at": order["at"]})
             v5_book.update_order(db, order["client_order_id"], status=order["status"], order_id=order["order_id"])
             if order["filled"]:
                 snapshot = {"status": order["toss_status"], "filled_quantity": order["filled"], "filled_amount": Decimal(order["amount"]), "average_price": None, "commission": Decimal(order["commission"]), "tax": Decimal(order["tax"])}
@@ -1230,7 +1394,10 @@ def _live_state(path: Path, state: dict, account_seq: int) -> None:
             number = f"{kind}-{at}-{symbol}-{side}"
             v5_book.add_intent(
                 db,
-                {"client_order_id": number, "kind": kind, "ledger_id": ledgers.get(kind), "date": at[:10], "turn": at[11:16], "symbol": symbol, "side": side, "tif": tif, "quantity": quantity, "created_at": at},
+                {
+                    "client_order_id": number, "kind": kind, "ledger_id": ledgers.get(kind), "account_seq": account_seq, "date": at[:10], "turn": at[11:16],
+                    "symbol": symbol, "side": side, "tif": tif, "quantity": quantity, "created_at": at,
+                },
             )
             v5_book.update_order(db, number, status=status, toss_status=toss_status, filled_quantity=filled, average_price=average, commission=commission, tax=tax, error=error)
         for at, kind, mode, reason, cleared in state["stops"]:
@@ -1321,7 +1488,7 @@ CASES = {
         ("계좌·보유·매수 가능 금액·수수료율·상하한가·주문 생성·취소·상세·목록의 주소·쿼리·두 헤더·본문, 계좌번호는 끝 네 자리만, 인증 정보·계좌번호·토큰이 출력과 파일에 없음", case_client_requests),
         (
             "함께 쓰는 토큰: 10분보다 많이 남으면 받지 않고 10분이면 받음, 동시에 만료를 본 두 쪽은 한 번만 받음, token-revoked면 파일의 다른 토큰이나 새로 받은 토큰으로"
-            " 한 번 다시 보내고 두 번 이어지면 V1_TOKEN_REVOKED, 파일 600·폴더 700",
+            " 한 번 다시 보내고 두 번 이어지면 V1_TOKEN_REVOKED, 파일 600·폴더 700(다른 쪽이 넓은 권한으로 만든 파일도 쓰기 전에 맞춤)",
             case_shared_token,
         ),
         ("명령 경로: fetch·v3-us-fetch·당일 1분봉 받기가 토큰 발급 없이 저장된 토큰을 씀", case_command_paths),
@@ -1354,18 +1521,21 @@ CASES = {
         ),
         (
             "중복 막기: 응답을 잃은 주문은 같은 번호로 다시 보내 주문이 하나(다시 켜져도), 받지 않는 주문은 10초마다 8분까지 48번 보낸 뒤 manual,"
-            " 429 Retry-After가 8분을 넘으면 8분에 manual, 다시 보내기 전 정지면 보내지 않고 manual, 같은 차례 두 번째 실주문 없음, 모르는 대기 주문은 안전 정지,"
+            " 429 Retry-After가 8분을 넘으면 8분에 manual, 다시 보내기 전 정지면 보내지 않고 manual, 성공 응답을 읽지 못한 주문은 결과 모름으로 두고 manual,"
+            " c + 10분 뒤에 켜진 실행기도 결과 모르는 주문을 manual로 한 뒤 끝냄, 같은 차례 두 번째 실주문 없음, 모르는 대기 주문은 안전 정지,"
             " 두 번째 실행기는 바로 끝남, 늦게 켜지면 밀린 차례를 건너뜀",
             case_live_duplicates,
         ),
         (
-            "정지: 주문 직전에 들어온 정지는 그 주문을 막고, 차례 사이 정지는 5초 안에 봇 주문을 취소하며, 멈춤 중에는 주문 없음, 멈추고 다 팔기는 다음 차례에 팖,"
-            " 실계좌 수량이 장부와 다르면 안전 정지, 거부가 세 번 이어지면 안전 정지(다시 켜져도 센 것이 이어짐)",
+            "정지: 주문 직전(진행 중 목록을 보는 사이 포함)에 들어온 정지는 그 주문을 막고, 봉을 기다리는 사이의 정지는 5초 안에 따르며, 차례 사이 정지는 5초 안에 봇 주문을 취소하고,"
+            " 멈춤 중에는 주문 없음, 멈추고 다 팔기는 다음 차례에 팖, 실계좌 수량이 장부와 다르면 안전 정지, 거부가 세 번 이어지면 안전 정지(다시 켜져도 센 것이 이어짐),"
+            " 토큰을 바꿔도 이어지는 토큰 오류는 안전 정지",
             case_live_stops,
         ),
         (
             "체결과 취소: 부분 체결분이 장부에 들어가고 다음 장중 차례에 남은 주문을 취소, 같은 상태를 다시 받아도 한 번, 늦은 수수료는 차이만,"
-            " 개장 전 주문은 개장 전에·종가 차례 주문은 마감 전에 취소하지 않음, 정정 상태는 안전 정지",
+            " 체결 수량이 줄어든 상세는 장부를 바꾸지 않고 안전 정지, 개장 전 주문은 개장 전에·종가 차례 주문은 마감 전에 취소하지 않음,"
+            " 끝 차례에 반영한 체결은 그날 마감 장부에 들어감, 정정 상태는 안전 정지",
             case_live_fills,
         ),
         (
@@ -1374,18 +1544,19 @@ CASES = {
             case_live_limits,
         ),
         (
-            "풀기: manual과 장부·실계좌 차이에서는 풀지 않고, 풀기 중에 들어온 정지는 남김, --new-ledger는 결과 모르는 주문을 봉인하고 예산으로 새 장부를 만들며"
-            " 다른 계좌·보유가 있으면 하지 않음",
+            "풀기: manual과 장부·실계좌 차이, 실장부가 없을 때의 모르는 대기 주문에서는 풀지 않고, 풀기 중에 들어온 정지는 남김,"
+            " --new-ledger는 결과 모르는 주문을 봉인하고 예산으로 새 장부를 만들며 다른 계좌·보유가 있으면 하지 않음",
             case_live_resume,
         ),
         (
             "연습 운용: 주문 생성·취소 없이 연습 장부에 그 봉 종가로 체결, 실장부로 넘어가지 않음, 그날 중 설정을 바꿔도 그날 방식 그대로, 실장부는 두 종목 0주·대기 없음·"
-            "매수 가능 금액 ≥ 예산일 때만, 실장부에 보유가 있으면 연습 운용으로 돌아가지 않음, 다른 쪽이 주문 잠금을 쥐면 주문·풀기 없음",
+            "매수 가능 금액 ≥ 예산이고 정지 중이 아닐 때만, 실장부에 보유가 있으면 연습 운용으로 돌아가지 않음, 다른 쪽이 주문 잠금을 쥐면 주문·풀기 없음",
             case_live_practice,
         ),
         (
-            "실주문 점검: 개장 전 OPG 1주 매수 → 취소 확인, 장중 1주 사고팔기(v5c- 번호, 장부에 넣지 않음), 매도 직전 정지면 팔지 않음, 실주문 중·보유가 있으면·"
-            "주문 잠금을 못 쥐면 주문하지 않음",
+            "실주문 점검: 개장 전 OPG 1주 매수 → 취소 확인(1주 체결됐으면 실패), 장중 1주 사고팔기(v5c- 번호, 장부에 넣지 않음, 끝 차례도 장부에 넣지 않고 그 주문의 계좌로 조회),"
+            " 매도 직전·진행 중 목록을 보는 사이의 정지면 보내지 않음, 실주문 중·보유가 있으면·주문 잠금을 못 쥐면·BROKERAGE 계좌가 아니면 주문하지 않음,"
+            " 그날 기록이 있으면 그날 계좌로 점검, 성공 응답을 읽지 못하면 결과 모름으로 두고 manual",
             case_live_check,
         ),
         (

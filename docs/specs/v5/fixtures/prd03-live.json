@@ -60,6 +60,10 @@
       "broker": {"post": [[429, {"error": {"code": "rate-limited", "message": "x"}}, {"Retry-After": "600"}]]},
       "posts_in_8_minutes": 1
     },
+    "unread": {
+      "ledger": {"cash": 500000},
+      "broker": {"post": [[200, {"result": {}}]]}
+    },
     "duplicate_turn": {
       "ledger": {"cash": 500000},
       "first": ["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "38"],
@@ -81,12 +85,15 @@
       "fill": ["v5-20251112-0901-069500-B", "PARTIAL_FILLED", 10, 100050, null, null],
       "after_partial": {"cash": 399950, "holdings": {"069500": 10}},
       "late_fee": 15,
-      "after_fee": {"cash": 399935, "holdings": {"069500": 10}}
+      "after_fee": {"cash": 399935, "holdings": {"069500": 10}},
+      "stale_fill": 5
     },
     "auction": {
       "ledger": {"cash": 500000},
       "pre_open": ["v5-20251112-0855-069500-B", "069500", "BUY", "OPG", "38"],
-      "closing": ["v5-20251112-1520-069500-B", "069500", "BUY", "DAY", "38"]
+      "closing": ["v5-20251112-1520-069500-B", "069500", "BUY", "DAY", "38"],
+      "closing_fill": ["v5-20251112-1520-069500-B", "FILLED", 38, 380000, 57, 0],
+      "close_holdings": {"069500": 38}
     },
     "limits": {
       "ledger": {"069500": 50, "cash": 0},
@@ -138,7 +145,10 @@
       "pre_open_at": "2025-11-12T08:40:00",
       "pre_open_posts": [["v5c-20251112-084000-B", "069500", "BUY", "OPG", "1"]],
       "intraday_at": "2025-11-12T10:00:00",
-      "intraday_posts": [["v5c-20251112-100000-B", "069500", "BUY", "DAY", "1"], ["v5c-20251112-100000-S", "069500", "SELL", "DAY", "1"]]
+      "intraday_posts": [["v5c-20251112-100000-B", "069500", "BUY", "DAY", "1"], ["v5c-20251112-100000-S", "069500", "SELL", "DAY", "1"]],
+      "other_account": 4,
+      "filled_cancel": ["v5c-20251112-084000-B", "CANCELED", 1, 10000, 1, 0],
+      "late_fill": ["v5c-20251112-100000-B", "FILLED", 1, 10000, 1, 0]
     },
     "rejected": {
       "ledger": {"cash": 500000},

@@ -193,7 +193,7 @@ class Live:
             except Stopped:
                 self._record(turn, None, "안전 정지")
             except toss.TossError as error:
-                if toss_account.classify(error) == "stop":
+                if toss_account.classify(error) == "stop" or error.code in toss_account.TOKEN_CODES:  # 조회·취소의 토큰 오류는 토큰을 바꿔 다시 보낸 뒤에도 이어진 것이다
                     self._stop("safety", f"토스 응답 오류({error.code} {error.remote})")
                 self._record(turn, None, f"토스 오류로 이 차례를 건너뜀({error.code})")
 
@@ -258,6 +258,10 @@ class Live:
             return ("live", live["account_seq"], "설정의 account_seq가 종합매매 계좌가 아니다") if live else ("dry", account, "설정의 account_seq가 종합매매 계좌가 아니다")
         if live:
             return "live", account, None
+        with v5_book.connect(self.paths.live) as db:
+            busy = v5_book.active_stops(db) or v5_book.orders(db, "status IN ('sending', 'unknown', 'open') AND kind != 'dry'")
+        if busy:
+            return "dry", account, "정지 중이거나 끝나지 않은 봇 주문·결과를 모르는 낼 주문이 있어 실장부를 만들지 않는다"
         held = toss_account.holdings(self.http, self.token, account)
         pending = [order for symbol in SYMBOLS for order in toss_account.open_orders(self.http, self.token, account, symbol)]
         power = toss_account.buying_power(self.http, self.token, account)
@@ -302,10 +306,11 @@ class Live:
         self._record(turn, result, action)
 
     def _end(self, turn: Turn) -> None:
+        self._resolve_unknown()
         with v5_book.connect(self.paths.live) as db:
             today = v5_book.orders(db, "date = ? AND order_id IS NOT NULL AND kind != 'dry'", (self.today,))
         for order in today:
-            self._apply(order)
+            self._apply(order, turn.at)  # 그날 마감 봇 자산(c + 10분까지의 장부)에 들어가게 끝 차례 시각으로 쓴다
         with v5_book.connect(self.paths.live) as db:
             db.execute("UPDATE days SET ended = 1 WHERE date = ?", (self.today,))
         self._record(turn, None, "끝 차례: 그날 봇 주문을 다시 조회함")
@@ -322,9 +327,9 @@ class Live:
                 self._cancel(order)
         return remaining
 
-    def _apply(self, order: dict) -> bool:
-        """상세 조회로 체결을 반영한다. 끝났으면 참이다."""
-        snapshot = toss_account.order(self.http, self.token, self._account(), order["order_id"])
+    def _apply(self, order: dict, at: datetime | None = None) -> bool:
+        """상세 조회로 체결을 반영한다(at을 주면 그 시각으로 쓴다). 끝났으면 참이다."""
+        snapshot = toss_account.order(self.http, self.token, order["account_seq"], order["order_id"])
         if snapshot["status"] in ("PENDING_REPLACE", "REPLACED", "REPLACE_REJECTED") or snapshot["status"] not in (
             "PENDING", "PENDING_CANCEL", "PARTIAL_FILLED", "FILLED", "CANCELED", "REJECTED", "CANCEL_REJECTED",
         ):
@@ -332,7 +337,9 @@ class Live:
             raise Stopped
         with v5_book.connect(self.paths.live) as db:
             current = v5_book.orders(db, "client_order_id = ?", (order["client_order_id"],))[0]
-            if not v5_book.apply_fill(db, current, snapshot, self.clock()):
+            if _mismatch(current, snapshot):
+                problem = "주문 상세의 종목·방향·주문 수량이 낸 주문과 다르거나 체결 수량이 앞서 반영한 수량보다 적거나 주문 수량보다 많다"
+            elif not v5_book.apply_fill(db, current, snapshot, at or self.clock()):
                 problem = "체결 수량이 있는데 체결 금액과 평균 체결가가 모두 없다"
             else:
                 problem = None
@@ -350,16 +357,24 @@ class Live:
 
     def _cancel(self, order: dict) -> None:
         try:
-            toss_account.cancel_order(self.http, self.token, self._account(), order["order_id"])
+            toss_account.cancel_order(self.http, self.token, order["account_seq"], order["order_id"])
         except toss.TossError as error:
+            if error.code in toss_account.TOKEN_CODES:
+                raise
             print(f"취소 요청 오류(상세 조회로 다시 본다): {error.code} {error.remote}")
 
     def _cancel_all(self) -> None:
-        """봇의 끝나지 않은 주문마다 취소를 요청한다. 끝났는지는 다음 차례의 상세 조회로 정한다."""
+        """봇의 끝나지 않은 주문마다 취소를 요청한다. 끝났는지는 다음 차례의 상세 조회로 정한다.
+
+        정지를 따르는 중이므로 토큰 오류도 출력만 한다. 이어지는 토큰 오류는 다음 차례의 상세 조회에서 안전 정지가 된다.
+        """
         with v5_book.connect(self.paths.live) as db:
             pending = v5_book.orders(db, "status = 'open' AND kind != 'dry'")
         for order in pending:
-            self._cancel(order)
+            try:
+                self._cancel(order)
+            except toss.TossError as error:
+                print(f"취소 요청 오류: {error.code} {error.remote}")
 
     def _count_rejection(self, db: sqlite3.Connection, ledger_id: int) -> None:
         count = (v5_book.latch(db, ledger_id, "rejections", "") or 0) + 1
@@ -395,11 +410,12 @@ class Live:
         """낼 주문을 한 번 보낸다. 결과에 따라 open, unknown, rejected가 된다."""
         try:
             order_id = toss_account.create_order(
-                self.http, self.token, self._account(), order["client_order_id"], order["symbol"], order["side"], order["tif"], order["quantity"]
+                self.http, self.token, order["account_seq"], order["client_order_id"], order["symbol"], order["side"], order["tif"], order["quantity"]
             )
         except toss.TossError as error:
             kind = toss_account.classify(error, order["token_errors"])
             token_error = error.code in toss_account.TOKEN_CODES
+            unread = error.code == "V5_TOSS_RESPONSE_INVALID"  # 성공 응답의 본문을 읽지 못했다. 주문이 생겼을 수 있다
             with v5_book.connect(self.paths.live) as db:
                 if kind == "retry":
                     v5_book.update_order(db, order["client_order_id"], status="unknown", error=error.remote or error.code, token_errors=order["token_errors"] + token_error)
@@ -407,9 +423,12 @@ class Live:
                     limit = datetime.fromisoformat(order["created_at"]) + UNKNOWN_LIMIT
                     self.next_try[order["client_order_id"]] = min(self.clock() + wait, limit)
                     return
-                v5_book.update_order(db, order["client_order_id"], status="rejected", error=error.remote or error.code)
+                v5_book.update_order(db, order["client_order_id"], status="unknown" if unread else "rejected", error=error.remote or error.code)
                 if kind == "reject" and order["kind"] == "live":
                     self._count_rejection(db, order["ledger_id"])
+            if unread:
+                self._manual(order, "주문 생성 응답을 읽을 수 없어 주문이 생겼는지 모른다")
+                raise Stopped from error
             if kind == "stop":
                 self._stop("safety", f"주문 오류({error.code} {error.remote})")
                 raise Stopped from error
@@ -476,13 +495,13 @@ class Live:
         client_order_id = f"v5-{self.today.replace('-', '')}-{(turn.bar or f'{turn.at:%H:%M}').replace(':', '')}-{symbol}-{side[0]}"
         if record["mode"] == "dry":
             return self._dry_fill(turn, client_order_id, ledger, symbol, side, tif, count, why)
+        self._scan_unknown_orders()
         stops = self._stops()
         if stops and not (side == "SELL" and self._sell_stop(stops)):
             return "주문 직전에 정지가 들어와 보내지 않음"
-        self._scan_unknown_orders()
         row = {
-            "client_order_id": client_order_id, "kind": "live", "ledger_id": ledger["id"], "date": self.today, "turn": turn.bar or turn.name,
-            "symbol": symbol, "side": side, "tif": tif, "quantity": count, "created_at": now.isoformat(timespec="seconds"),
+            "client_order_id": client_order_id, "kind": "live", "ledger_id": ledger["id"], "account_seq": record["account_seq"], "date": self.today,
+            "turn": turn.bar or turn.name, "symbol": symbol, "side": side, "tif": tif, "quantity": count, "created_at": now.isoformat(timespec="seconds"),
         }
         try:
             with v5_book.connect(self.paths.live) as db:
@@ -505,8 +524,8 @@ class Live:
                 gain = (price - int(Decimal(bought[-1]["average_price"]))) * count if bought else 0
                 tax = gain * 154 // 1000 if gain > 0 else 0
             row = {
-                "client_order_id": client_order_id, "kind": "dry", "ledger_id": ledger["id"], "date": self.today, "turn": turn.bar or turn.name,
-                "symbol": symbol, "side": side, "tif": tif, "quantity": count, "created_at": now.isoformat(timespec="seconds"),
+                "client_order_id": client_order_id, "kind": "dry", "ledger_id": ledger["id"], "account_seq": self._account(), "date": self.today,
+                "turn": turn.bar or turn.name, "symbol": symbol, "side": side, "tif": tif, "quantity": count, "created_at": now.isoformat(timespec="seconds"),
             }
             v5_book.add_intent(db, row)
             order = v5_book.orders(db, "client_order_id = ?", (client_order_id,))[0]
@@ -621,6 +640,8 @@ class Live:
                 with v5_book.connect(self.paths.live) as db:
                     db.execute("UPDATE days SET commission = ? WHERE date = ?", (str(rate), self.today))
         except toss.TossError as error:
+            if error.code in toss_account.TOKEN_CODES:
+                raise
             print(f"상·하한가·수수료율을 받지 못했다(다음 차례에 다시): {error.code}")
 
     def _wait_bars(self, turn: Turn) -> dict[str, list[Bar]]:
@@ -629,9 +650,11 @@ class Live:
             try:
                 bars = self.bars(self.today)
             except toss.TossError as error:
+                if error.code in toss_account.TOKEN_CODES:
+                    raise
                 print(f"1분봉을 받지 못했다: {error.code}")
                 bars = {}
-            if all(any(bar.time == turn.bar for bar in bars.get(symbol, [])) for symbol in SYMBOLS) or self.clock() >= limit:
+            if all(any(bar.time == turn.bar for bar in bars.get(symbol, [])) for symbol in SYMBOLS) or self.clock() >= limit or self._stops():
                 return bars
             self.sleep(2)
 
@@ -744,11 +767,14 @@ def resume(paths: Paths, http: httpx.Client, token: toss_account.Token, clock: C
             real = toss_account.holdings(http, token, account)
             with v5_book.connect(paths.live) as db:
                 _, held = v5_book.balance(db, live["id"])
-                known = {order["order_id"] for order in v5_book.orders(db, "order_id IS NOT NULL")}
             if any(real[symbol] != held.get(symbol, 0) for symbol in SYMBOLS):
                 problems.append(f"실계좌 수량 {real}이 장부 {held}와 다르다")
-            if any(order["order_id"] not in known for symbol in SYMBOLS for order in toss_account.open_orders(http, token, account, symbol)):
-                problems.append("봇이 기록하지 않은 대기 주문이 있다")
+        else:  # 연습 운용: 그날 계좌, 그날 기록 전이면 설정 계좌의 진행 중 목록을 본다
+            account = record["account_seq"] if record else config["account_seq"] if config else None
+        with v5_book.connect(paths.live) as db:
+            known = {order["order_id"] for order in v5_book.orders(db, "order_id IS NOT NULL")}
+        if account is not None and any(order["order_id"] not in known for symbol in SYMBOLS for order in toss_account.open_orders(http, token, account, symbol)):
+            problems.append("봇이 기록하지 않은 대기 주문이 있다")
         if problems:
             print("풀지 않았다: " + "; ".join(problems))
             return 1
@@ -761,13 +787,18 @@ def resume(paths: Paths, http: httpx.Client, token: toss_account.Token, clock: C
 def check(paths: Paths, http: httpx.Client, token: toss_account.Token, clock: Callable[[], datetime], sleep: Callable[[float], None], order: bool) -> int:
     """v5-check [--order]: 계좌 조회, 그리고 사람이 지켜보는 실주문 점검(PRD 03)."""
     config = read_config(paths.config)
-    for item in toss_account.accounts(http, token):
+    found = toss_account.accounts(http, token)
+    for item in found:
         print(f"계좌 seq {item['seq']} {item['type']} 끝 네 자리 {item['tail']}")
     if config is None:
         print("설정 파일이 없거나 틀리다(account_seq를 정해 data/v5/config.json에 적는다)")
         return 1 if order else 0
-    account = config["account_seq"]
-    print(f"보유 {toss_account.holdings(http, token, account)}, 매수 가능 금액 {toss_account.buying_power(http, token, account):,}원, 수수료율 {toss_account.commission_rate(http, token, account)}")
+    today = v5_book.read(paths.live, "SELECT account_seq FROM days WHERE date = ?", (clock().date().isoformat(),))
+    account = today[0]["account_seq"] if today and today[0]["account_seq"] is not None else config["account_seq"]  # 그날 기록이 있으면 그날 계좌(SPEC 4.7)
+    print(
+        f"계좌 seq {account}: 보유 {toss_account.holdings(http, token, account)}, 매수 가능 금액 {toss_account.buying_power(http, token, account):,}원, "
+        f"수수료율 {toss_account.commission_rate(http, token, account)}"
+    )
     for symbol in SYMBOLS:
         print(f"{symbol} 오늘 상·하한가 {toss_account.price_limits(http, token, symbol)}")
     if not order:
@@ -776,10 +807,13 @@ def check(paths: Paths, http: httpx.Client, token: toss_account.Token, clock: Ca
         if not held:
             print("V5_ORDER_LOCK_BUSY: 주문 잠금을 30초 안에 쥐지 못했다")
             return 1
-        return _check_order(paths, http, token, clock, sleep, config)
+        return _check_order(paths, http, token, clock, sleep, config, found)
 
 
-def _check_order(paths: Paths, http: httpx.Client, token: toss_account.Token, clock: Callable[[], datetime], sleep: Callable[[float], None], config: dict) -> int:
+def _check_order(
+    paths: Paths, http: httpx.Client, token: toss_account.Token, clock: Callable[[], datetime], sleep: Callable[[float], None], config: dict, found: list[dict]
+) -> int:
+    """점검 주문. 계좌는 그날 기록이 있으면 그날 account_seq(SPEC 4.7: 시작 점검 때만 읽는다), 없으면 설정의 account_seq다."""
     now = clock()
     today = now.date().isoformat()
     with v5_book.connect(paths.live) as db:
@@ -788,7 +822,10 @@ def _check_order(paths: Paths, http: httpx.Client, token: toss_account.Token, cl
     if (record["mode"] if record else ("live" if config["orders"] else "dry")) != "dry":
         print("연습 운용 중에만 점검 주문을 낸다")
         return 1
-    account = config["account_seq"]
+    account = record["account_seq"] if record else config["account_seq"]
+    if not any(item["seq"] == account and item["type"] == "BROKERAGE" for item in found):
+        print(f"점검할 계좌(seq {account})가 계좌 목록의 종합매매(BROKERAGE) 계좌가 아니다")
+        return 1
     real = toss_account.holdings(http, token, account)
     pending = [item for symbol in SYMBOLS for item in toss_account.open_orders(http, token, account, symbol)]
     if any(real.values()) or pending or unresolved:
@@ -805,62 +842,87 @@ def _check_order(paths: Paths, http: httpx.Client, token: toss_account.Token, cl
         return 1
     for side, tif, expected in steps:
         with v5_book.connect(paths.live) as db:
-            stops = v5_book.active_stops(db)
             known = {item["order_id"] for item in v5_book.orders(db, "order_id IS NOT NULL")}
-        if stops:
-            print("정지가 있어 점검 주문을 보내지 않았다")
-            return 1
         if any(item["order_id"] not in known for symbol in SYMBOLS for item in toss_account.open_orders(http, token, account, symbol)):
             with v5_book.connect(paths.live) as db:
                 v5_book.add_stop(db, "safety", "hold", "점검 주문 직전에 봇이 기록하지 않은 대기 주문이 있다", clock())
             print("봇이 기록하지 않은 대기 주문이 있어 안전 정지했다")
+            return 1
+        with v5_book.connect(paths.live) as db:
+            stops = v5_book.active_stops(db)
+        if stops:
+            print("정지가 있어 점검 주문을 보내지 않았다")
             return 1
         client_order_id = f"v5c-{clock():%Y%m%d-%H%M%S}-{side[0]}"
         with v5_book.connect(paths.live) as db:
             v5_book.add_intent(
                 db,
                 {
-                    "client_order_id": client_order_id, "kind": "check", "ledger_id": None, "date": today, "turn": "check", "symbol": "069500",
-                    "side": side, "tif": tif, "quantity": 1, "created_at": clock().isoformat(timespec="seconds"),
+                    "client_order_id": client_order_id, "kind": "check", "ledger_id": None, "account_seq": account, "date": today, "turn": "check",
+                    "symbol": "069500", "side": side, "tif": tif, "quantity": 1, "created_at": clock().isoformat(timespec="seconds"),
                 },
             )
         try:
             order_id = toss_account.create_order(http, token, account, client_order_id, "069500", side, tif, 1)
         except toss.TossError as error:
             kind = toss_account.classify(error)
+            unread = error.code == "V5_TOSS_RESPONSE_INVALID"  # 성공 응답의 본문을 읽지 못했다. 주문이 생겼을 수 있다
             with v5_book.connect(paths.live) as db:
-                v5_book.update_order(db, client_order_id, status="unknown" if kind == "retry" else "rejected", error=error.remote or error.code)
-                if kind == "stop":
+                v5_book.update_order(db, client_order_id, status="unknown" if kind == "retry" or unread else "rejected", error=error.remote or error.code)
+                if unread:
+                    v5_book.add_stop(db, "manual", "hold", f"수동 확인 필요: 점검 주문 생성 응답을 읽을 수 없어 주문이 생겼는지 모른다(주문 번호 {client_order_id})", clock())
+                elif kind == "stop":
                     v5_book.add_stop(db, "safety", "hold", f"점검 주문 오류({error.code} {error.remote})", clock())
             print(f"점검 주문 오류 {error.code} {error.remote}: 다음 단계로 가지 않는다")
             return 1
         with v5_book.connect(paths.live) as db:
             v5_book.update_order(db, client_order_id, status="open", order_id=order_id)
-        if expected == "CANCELED":
-            try:
-                toss_account.cancel_order(http, token, account, order_id)
-            except toss.TossError as error:
-                print(f"취소 요청 오류 {error.code} {error.remote}")
-        status, waited = None, 0
-        while waited <= CHECK_WAIT:
-            snapshot = toss_account.order(http, token, account, order_id)
-            status = snapshot["status"]
-            with v5_book.connect(paths.live) as db:
-                current = v5_book.orders(db, "client_order_id = ?", (client_order_id,))[0]
-                v5_book.update_order(
-                    db, client_order_id, toss_status=status, filled_quantity=snapshot["filled_quantity"],
-                    status="final" if toss_account.is_final(status) else "open",
-                )
-            if toss_account.is_final(status):
-                break
-            sleep(2)
-            waited += 2
-        print(f"점검 {side} {tif} 1주: {status}")
-        if status != expected:
-            print(f"기대한 상태({expected})가 아니어서 다음 단계로 가지 않는다. 실행기가 이어서 조회·취소한다")
+        try:
+            if expected == "CANCELED":
+                try:
+                    toss_account.cancel_order(http, token, account, order_id)
+                except toss.TossError as error:
+                    if error.code in toss_account.TOKEN_CODES:
+                        raise
+                    print(f"취소 요청 오류 {error.code} {error.remote}")
+            status, waited = None, 0
+            while waited <= CHECK_WAIT:
+                snapshot = toss_account.order(http, token, account, order_id)
+                status = snapshot["status"]
+                with v5_book.connect(paths.live) as db:
+                    current = v5_book.orders(db, "client_order_id = ?", (client_order_id,))[0]
+                    readable = not _mismatch(current, snapshot) and v5_book.apply_fill(db, current, snapshot, clock())
+                    if readable:
+                        v5_book.update_order(db, client_order_id, status="final" if toss_account.is_final(status) else "open")
+                    else:
+                        v5_book.add_stop(db, "safety", "hold", "점검 주문 상세가 낸 주문과 맞지 않거나 체결 금액을 읽을 수 없다", clock())
+                if not readable:
+                    print("점검 주문 상세를 믿을 수 없어 안전 정지했다. 다음 단계로 가지 않는다")
+                    return 1
+                if toss_account.is_final(status):
+                    break
+                sleep(2)
+                waited += 2
+        except toss.TossError as error:
+            if toss_account.classify(error) == "stop" or error.code in toss_account.TOKEN_CODES:
+                with v5_book.connect(paths.live) as db:
+                    v5_book.add_stop(db, "safety", "hold", f"점검 주문 뒤 토스 응답 오류({error.code} {error.remote})", clock())
+            print(f"점검 주문 뒤 토스 오류 {error.code} {error.remote}: 다음 단계로 가지 않는다. 실행기가 이어서 조회·취소한다")
+            return 1
+        wanted = 0 if expected == "CANCELED" else 1
+        print(f"점검 {side} {tif} 1주: {status}, 체결 {snapshot['filled_quantity']}주")
+        if status != expected or snapshot["filled_quantity"] != wanted:
+            print(f"기대한 상태({expected}, 체결 {wanted}주)가 아니어서 다음 단계로 가지 않는다. 실행기가 이어서 조회·취소한다")
             return 1
     print(f"끝: 보유 {toss_account.holdings(http, token, account)}, 대기 주문 {sum(len(toss_account.open_orders(http, token, account, symbol)) for symbol in SYMBOLS)}건")
     return 0
+
+
+def _mismatch(order: dict, snapshot: dict) -> bool:
+    """상세가 낸 주문과 종목·방향·주문 수량이 다르거나 체결 수량이 앞서 반영한 수량보다 적거나 주문 수량보다 많은가(읽을 수 없는 응답, PRD 03)."""
+    return (snapshot["symbol"], snapshot["side"], snapshot["quantity"]) != (order["symbol"], order["side"], order["quantity"]) or not (
+        order["applied_quantity"] <= snapshot["filled_quantity"] <= order["quantity"]
+    )
 
 
 def _fee(amount: int, rate: Decimal) -> int:

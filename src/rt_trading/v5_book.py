@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS entries (
     cash INTEGER NOT NULL, symbol TEXT, quantity INTEGER NOT NULL, client_order_id TEXT
 );
 CREATE TABLE IF NOT EXISTS orders (
-    client_order_id TEXT PRIMARY KEY, kind TEXT NOT NULL, ledger_id INTEGER, date TEXT NOT NULL, turn TEXT NOT NULL,
+    client_order_id TEXT PRIMARY KEY, kind TEXT NOT NULL, ledger_id INTEGER, account_seq INTEGER, date TEXT NOT NULL, turn TEXT NOT NULL,
     symbol TEXT NOT NULL, side TEXT NOT NULL, tif TEXT NOT NULL, quantity INTEGER NOT NULL, created_at TEXT NOT NULL,
     order_id TEXT, status TEXT NOT NULL, toss_status TEXT, filled_quantity INTEGER NOT NULL DEFAULT 0, filled_amount TEXT,
     average_price TEXT, commission TEXT, tax TEXT, applied_quantity INTEGER NOT NULL DEFAULT 0, applied_amount INTEGER NOT NULL DEFAULT 0,
@@ -90,7 +90,7 @@ def balance(db: sqlite3.Connection, ledger_id: int, until: str | None = None) ->
 
 def add_intent(db: sqlite3.Connection, row: dict) -> None:
     """낼 주문을 sending으로 쓴다. 같은 (날짜, 차례)의 두 번째 실주문은 sqlite3.IntegrityError다."""
-    columns = ("client_order_id", "kind", "ledger_id", "date", "turn", "symbol", "side", "tif", "quantity", "created_at")
+    columns = ("client_order_id", "kind", "ledger_id", "account_seq", "date", "turn", "symbol", "side", "tif", "quantity", "created_at")
     db.execute(f"INSERT INTO orders ({', '.join(columns)}, status) VALUES ({', '.join('?' * len(columns))}, 'sending')", tuple(row[key] for key in columns))
 
 
@@ -105,7 +105,7 @@ def update_order(db: sqlite3.Connection, client_order_id: str, **fields: object)
 def apply_fill(db: sqlite3.Connection, order: dict, snapshot: dict, now: datetime) -> bool:
     """상세 조회 snapshot의 체결에서 앞서 반영한 값을 빼 그 차이만 장부에 쓴다. 체결 금액·평균가가 모두 없으면 False(안전 정지할 것)다.
 
-    부르는 쪽의 트랜잭션(connect의 with 블록) 하나 안에서 장부 기록과 반영 값 바꾸기를 함께 한다.
+    부르는 쪽의 트랜잭션(connect의 with 블록) 하나 안에서 장부 기록과 반영 값 바꾸기를 함께 한다. 장부가 없는 점검 주문은 주문 행만 바꾼다.
     """
     quantity = snapshot["filled_quantity"]
     if snapshot["filled_amount"] is not None:
@@ -120,7 +120,7 @@ def apply_fill(db: sqlite3.Connection, order: dict, snapshot: dict, now: datetim
     commission, tax = int(snapshot["commission"] or 0), int(snapshot["tax"] or 0)
     delta_quantity, delta_amount = quantity - order["applied_quantity"], amount - order["applied_amount"]
     delta_cost = (commission - order["applied_commission"]) + (tax - order["applied_tax"])
-    if delta_quantity or delta_amount or delta_cost:
+    if order["ledger_id"] is not None and (delta_quantity or delta_amount or delta_cost):
         sign = -1 if order["side"] == "BUY" else 1
         db.execute(
             "INSERT INTO entries (ledger_id, time, reason, cash, symbol, quantity, client_order_id) VALUES (?, ?, 'fill', ?, ?, ?, ?)",

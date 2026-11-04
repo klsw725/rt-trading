@@ -59,8 +59,10 @@ class SharedToken:
             self.value = saved if saved is not None and saved != stale else self._issue()
 
     def _saved(self) -> str | None:
-        """파일의 토큰. 없거나, 읽을 수 없거나, 만료까지 10분 이하로 남았으면 None이다."""
+        """파일의 토큰. 없거나, 읽을 수 없거나, 만료까지 10분 이하로 남았으면 None이다. 읽기 전에 폴더 700·파일 600으로 맞추고, 맞추지 못하면 쓰지 않는다."""
         try:
+            os.chmod(self.path.parent, 0o700)
+            os.chmod(self.path, 0o600)
             content = json.loads(self.path.read_text(encoding="utf-8"))
             if datetime.fromisoformat(content["expires_at"]) - self.clock() > TOKEN_MARGIN:
                 return str(content["access_token"])
