@@ -32,6 +32,7 @@ from rt_trading import (
     v4_news,
     v4_report,
     v4_serve,
+    web_acceptance,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -76,6 +77,7 @@ def main() -> None:
     v4_serve_args.add_argument("--host", default="127.0.0.1")
     v4_checks = commands.add_parser("v4-acceptance", help="v4 acceptance를 네트워크 없이 실행한다")
     v4_checks.add_argument("--prd", choices=sorted(v4_acceptance.CASES))
+    commands.add_parser("web-acceptance", help="현황 웹페이지 모양(web SPEC) acceptance를 네트워크 없이 실행한다")
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -107,6 +109,8 @@ def main() -> None:
         sys.exit(v4_serve.run(V4_PATHS, v4_daily.PERIOD, v3_daily.HOLIDAYS, REPORT_DIR, V4_DIR / "run.log", args.host, v4_serve.PORT))
     if args.command == "v4-acceptance":
         sys.exit(v4_acceptance.run(args.prd))
+    if args.command == "web-acceptance":
+        sys.exit(web_acceptance.run())
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
 
 

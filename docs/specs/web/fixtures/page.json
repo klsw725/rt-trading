@@ -1,0 +1,91 @@
+{
+  "start": "2025-11-10",
+  "holidays": [],
+  "now": "2025-11-12T12:03:00",
+  "status": {
+    "started_at": "2025-11-12 07:00:00",
+    "running": null,
+    "last": {"slot": "판단 12:00", "started_at": "2025-11-12 12:00:00", "finished_at": "2025-11-12 12:00:20", "exits": [["v4-decide --at 12:00", 1]]}
+  },
+  "settled": ["2025-11-10"],
+  "decisions": [
+    {"date": "2025-11-10", "slot": "08:50", "kind": "pre_open", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-10", "slot": "10:00", "kind": "intraday", "status": "capped", "subordinate": "hold_inverse", "reason": "내린다"},
+    {"date": "2025-11-10", "slot": "11:00", "kind": "intraday", "status": "late", "subordinate": "hold_kodex200", "reason": ""},
+    {"date": "2025-11-10", "slot": "12:00", "kind": "intraday", "status": "invalid", "subordinate": "", "reason": ""},
+    {"date": "2025-11-10", "slot": "13:00", "kind": "intraday", "status": "failed", "subordinate": "", "reason": ""},
+    {"date": "2025-11-10", "slot": "14:00", "kind": "intraday", "status": "missing", "subordinate": "", "reason": ""},
+    {"date": "2025-11-10", "slot": "15:10", "kind": "pre_close", "status": "ok", "subordinate": "cash", "reason": "<img src=x onerror=alert(1)> <a href=\"javascript:alert(1)\">x</a> <style>@import url(http://example.com/x.css)</style>"},
+    {"date": "2025-11-11", "slot": "08:50", "kind": "pre_open", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-11", "slot": "10:00", "kind": "intraday", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-11", "slot": "12:00", "kind": "intraday", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-11", "slot": "13:00", "kind": "intraday", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-11", "slot": "14:00", "kind": "intraday", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-11", "slot": "15:10", "kind": "pre_close", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-12", "slot": "08:50", "kind": "pre_open", "status": "ok", "subordinate": "cash", "reason": "쉰다"},
+    {"date": "2025-11-12", "slot": "10:00", "kind": "intraday", "status": "ok", "subordinate": "hold_kodex200", "reason": "오른다"},
+    {"date": "2025-11-12", "slot": "11:00", "kind": "intraday", "status": "capped", "subordinate": "hold_inverse", "reason": "내린다"},
+    {"date": "2025-11-12", "slot": "12:00", "kind": "intraday", "status": "failed", "subordinate": "", "reason": ""}
+  ],
+  "log_lines": 3,
+  "reports": {
+    "v4-20251111-082000": {
+      "report": {
+        "run": {"settled_through": "2025-11-10", "initial_capital": 500000},
+        "accounts": [{"id": "head", "final_equity": 512345, "total_return": 0.02469, "max_drawdown": 0.0, "trade_count": 1}],
+        "verdict": null
+      },
+      "trades_head": [["2025-11-10T09:01:00+09:00", "069500", "buy", 5, 89280, 83, 0, "signal"]]
+    },
+    "v4-20251112-082000": {
+      "report": {
+        "run": {"settled_through": "2025-11-11", "initial_capital": 500000},
+        "accounts": [
+          {"id": "head", "final_equity": 497500, "total_return": -0.005, "max_drawdown": 0.031, "trade_count": 1},
+          {"id": "morning", "final_equity": 503000, "total_return": 0.006, "max_drawdown": 0.002, "trade_count": 1}
+        ],
+        "verdict": null
+      },
+      "trades_head": [
+        ["2025-11-10T09:01:00+09:00", "069500", "buy", 5, 89280, 83, 0, "signal"],
+        ["2025-11-11T10:06:00+09:00", "069500", "sell", 5, 88800, 83, 0, "switch_head"],
+        ["2025-11-11T10:06:00+09:00", "114800", "buy", 40, 11085, 83, 0, "signal"]
+      ]
+    }
+  },
+  "latest": "v4-20251112-082000",
+  "variants": {
+    "sold": {
+      "report": null,
+      "trades_head": [
+        ["2025-11-10T09:01:00+09:00", "069500", "buy", 5, 89280, 83, 0, "signal"],
+        ["2025-11-11T10:06:00+09:00", "069500", "sell", 5, 88800, 83, 0, "switch_head"]
+      ]
+    },
+    "bare": {
+      "report": {"accounts": [{"id": "head", "final_equity": 500000, "total_return": 0.0, "max_drawdown": 0.0, "trade_count": 0}], "verdict": null},
+      "trades_head": null
+    }
+  },
+  "expected": {
+    "cards": ["자동 실행", "기간", "헤드 계좌", "판단"],
+    "settle_bar": [1, 5],
+    "decision_card": ["판단 실패 6번", "ok 10번 · capped 2번 · 지난 차례 18개", "통과 기준: 기간 35차례 모두 ok·capped"],
+    "decision_tone": "tone-bad",
+    "map": [
+      ["11-10(월)", [["08:50", "ok · cash", "good"], ["10:00", "capped · hold_inverse", "warn"], ["11:00", "late · hold_kodex200", "bad"], ["12:00", "invalid", "bad"], ["13:00", "failed", "bad"], ["14:00", "missing", "bad"], ["15:10", "ok · cash", "good"]]],
+      ["11-11(화)", [["08:50", "ok · cash", "good"], ["10:00", "ok · cash", "good"], ["11:00", "없음", "bad"], ["12:00", "ok · cash", "good"], ["13:00", "ok · cash", "good"], ["14:00", "ok · cash", "good"], ["15:10", "ok · cash", "good"]]],
+      ["11-12(수)", [["08:50", "ok · cash", "good"], ["10:00", "ok · hold_kodex200", "good"], ["11:00", "capped · hold_inverse", "warn"], ["12:00", "failed", "bad"], ["13:00", "대기", "wait"], ["14:00", "대기", "wait"], ["15:10", "대기", "wait"]]],
+      ["11-13(목)", [["09:50", "대기", "wait"], ["11:00", "대기", "wait"], ["12:00", "대기", "wait"], ["13:00", "대기", "wait"], ["14:00", "대기", "wait"], ["15:00", "대기", "wait"], ["16:10", "대기", "wait"]]],
+      ["11-14(금)", [["08:50", "대기", "wait"], ["10:00", "대기", "wait"], ["11:00", "대기", "wait"], ["12:00", "대기", "wait"], ["13:00", "대기", "wait"], ["14:00", "대기", "wait"], ["15:10", "대기", "wait"]]]
+    ],
+    "head": {
+      "present": ["497,500원", "수익 -2,500원 (-0.50%)", "보유: KODEX 인버스 40주", "2025-11-11 마감 기준", "최대 낙폭 3.10% / 기준 20%"],
+      "absent": ["512,345원", "503,000원", "KODEX 200", "2025-11-10 마감 기준"],
+      "profit_tone": ["down", "-2,500원 (-0.50%)"],
+      "drawdown_bar": [0.031, 0.2]
+    },
+    "sold": {"present": ["보유: 현금"], "absent": ["KODEX"]},
+    "bare": {"present": ["500,000원", "수익 0원 (0.00%)", "보유: 기록 없음"], "absent": ["마감 기준", "+0원", "+0.00%"]}
+  }
+}
