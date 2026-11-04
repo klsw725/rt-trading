@@ -1,0 +1,52 @@
+{
+  "holidays": [],
+  "start": "2025-10-30",
+  "markets": {
+    "flat": {"fetched_at": "2025-11-01T07:00:00+09:00", "volume": 1000, "days": [{"date": "2025-10-29", "prices": {"069500": 10000, "114800": 1500}}, {"date": "2025-10-30"}, {"date": "2025-10-31"}]},
+    "drop": {"fetched_at": "2025-11-01T07:00:00+09:00", "volume": 1000, "days": [{"date": "2025-10-29", "prices": {"069500": 10000, "114800": 1500}}, {"date": "2025-10-30", "bars": {"069500": {"11:00": [10000, 10000, 9790, 9790, 1000]}}}]}
+  },
+  "received": {"069500": [13000, 7000], "114800": [1950, 1050]},
+  "tests": {"T_day": {"overnight": false, "orders": [["2025-10-30", "09:30", "buy", "069500"]]}},
+  "decisions": {
+    "cash_then_kodex": [["2025-10-30", "08:50", "pre_open", "ok", "cash"], ["2025-10-30", "10:00", "intraday", "ok", "hold_kodex200"]],
+    "kodex": [["2025-10-30", "08:50", "pre_open", "ok", "hold_kodex200"]],
+    "cash_then_overnight": [["2025-10-30", "08:50", "pre_open", "ok", "cash"], ["2025-10-30", "15:10", "pre_close", "ok", "overnight"]],
+    "day_trader": [["2025-10-30", "08:50", "pre_open", "ok", "T_day"]],
+    "cash_then_inverse_next_day": [["2025-10-30", "08:50", "pre_open", "ok", "cash"], ["2025-10-31", "08:50", "pre_open", "ok", "hold_inverse"]],
+    "kodex_then_inverse_next_day": [["2025-10-30", "08:50", "pre_open", "ok", "hold_kodex200"], ["2025-10-31", "08:50", "pre_open", "ok", "hold_inverse"]],
+    "kodex_then_inverse": [["2025-10-30", "08:50", "pre_open", "ok", "hold_kodex200"], ["2025-10-30", "11:00", "intraday", "ok", "hold_inverse"]],
+    "turn_of_month": [["2025-10-30", "08:50", "pre_open", "ok", "turn_of_month"]]
+  },
+  "cases": [
+    {"name": "교체 전 현금", "market": "flat", "decisions": "cash_then_kodex", "today": "2025-10-30", "kind": "intraday", "bar": "10:04", "symbol": null, "state": {"holding": null, "buy": null, "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "장중 교체", "market": "flat", "decisions": "cash_then_kodex", "today": "2025-10-30", "kind": "intraday", "bar": "10:05", "symbol": "069500", "state": {"holding": null, "buy": ["069500", false], "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "장중 교체 체결 뒤 보유", "market": "flat", "decisions": "cash_then_kodex", "today": "2025-10-30", "kind": "intraday", "bar": "10:06", "symbol": "069500", "state": {"holding": ["069500", 49], "buy": null, "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "하루 한도 매도", "market": "drop", "decisions": "kodex", "today": "2025-10-30", "kind": "intraday", "bar": "11:00", "symbol": null, "state": {"holding": ["069500", 49], "buy": null, "sell_reason": "limit", "limits": {"daily": true, "weekly": false, "cumulative": false}}},
+    {"name": "하루 한도 매도 체결 뒤", "market": "drop", "decisions": "kodex", "today": "2025-10-30", "kind": "intraday", "bar": "11:01", "symbol": null, "state": {"holding": null, "buy": null, "sell_reason": null, "limits": {"daily": true, "weekly": false, "cumulative": false}}},
+    {"name": "마감 10분 전 overnight 매수", "market": "flat", "decisions": "cash_then_overnight", "today": "2025-10-30", "kind": "closing", "bar": "15:20", "symbol": "069500", "state": {"holding": null, "buy": ["069500", false], "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "하루 안에 끝나는 부하의 장중 보유", "market": "flat", "decisions": "day_trader", "today": "2025-10-30", "kind": "intraday", "bar": "15:19", "symbol": "069500", "state": {"holding": ["069500", 49], "buy": null, "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "종가 차례 마감 청산", "market": "flat", "decisions": "day_trader", "today": "2025-10-30", "kind": "closing", "bar": "15:20", "symbol": null, "state": {"holding": ["069500", 49], "buy": null, "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "개장 전 보유 부하 매수", "market": "flat", "decisions": "cash_then_inverse_next_day", "today": "2025-10-31", "kind": "pre_open", "bar": null, "symbol": "114800", "state": {"holding": null, "buy": ["114800", false], "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "개장 전 교체(판 뒤 삼)", "market": "flat", "decisions": "kodex_then_inverse_next_day", "today": "2025-10-31", "kind": "pre_open", "bar": null, "symbol": "114800", "state": {"holding": ["069500", 49], "buy": ["114800", true], "sell_reason": "switch_head", "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "장중 교체(판 뒤 삼)", "market": "flat", "decisions": "kodex_then_inverse", "today": "2025-10-30", "kind": "intraday", "bar": "11:05", "symbol": "114800", "state": {"holding": ["069500", 49], "buy": ["114800", true], "sell_reason": "switch_head", "limits": {"daily": false, "weekly": false, "cumulative": false}}},
+    {"name": "월말 turn_of_month", "market": "flat", "decisions": "turn_of_month", "today": "2025-10-30", "kind": "closing", "bar": "15:20", "symbol": "069500", "state": {"holding": null, "buy": ["069500", false], "sell_reason": null, "limits": {"daily": false, "weekly": false, "cumulative": false}}}
+  ],
+  "future": {"case": "장중 교체", "bars": {"069500": {"10:06": [12000, 12000, 12000, 12000, 5000], "11:00": [8000, 8000, 8000, 8000, 5000]}}},
+  "limits": [[89280, "2026-11-10", [116060, 62500]], [2000, "2026-11-10", [2600, 1400]], [1999, "2026-11-10", [2595, 1400]], [1995, "2026-11-10", [2590, 1397]], [1995, "2023-12-08", [2590, 1400]]],
+  "one_tick_off": {"069500": [13005, 7000], "114800": [1950, 1050]},
+  "sixth": {
+    "history": {"from": "2025-07-21", "to": "2025-10-24", "prices": {"069500": 10000, "114800": 1500}},
+    "start": "2025-10-27",
+    "today": "2025-11-03",
+    "decisions": [["2025-10-27", "08:50", "pre_open", "ok", "hold_kodex200"], ["2025-10-28", "08:50", "pre_open", "ok", "hold_kodex200"], ["2025-10-29", "08:50", "pre_open", "ok", "hold_kodex200"], ["2025-10-30", "08:50", "pre_open", "ok", "hold_kodex200"], ["2025-10-31", "08:50", "pre_open", "ok", "hold_kodex200"]],
+    "us": {"from": "2025-08-01", "to": "2025-10-31", "prices": {"SOXX": "200", "QQQ": "500", "SPY": "600", "MU": "100"}},
+    "expected": {
+      "head_account": {"subordinate": "hold_kodex200", "holding": "069500"},
+      "decision": {"kind": "pre_open", "deadline": "08:50", "current": "hold_kodex200", "switches_left": 2},
+      "recent_decisions": 5,
+      "settled_through": "2025-10-31",
+      "model": "gpt-6-sol",
+      "holding_after_fifth_day": ["069500", 49]
+    }
+  }
+}

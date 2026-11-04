@@ -1,19 +1,23 @@
 """v5 acceptance. PRD별 사례를 네트워크 없이 실행하고 결과를 JSON으로 출력한다."""
 
 import contextlib
+import functools
 import io
 import json
 import os
+import sqlite3
 import tempfile
 import threading
 import time
+from contextlib import closing
+from datetime import date as Date
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
 import httpx
 
-from rt_trading import cli, toss, toss_account, v4_daily
+from rt_trading import cli, codex, engine, fixtures, toss, toss_account, v3_daily, v3_paper, v3_us, v4_acceptance, v4_daily, v4_head, v4_paper, v5_target
 from rt_trading.toss import KST
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -251,6 +255,141 @@ def case_order_errors() -> None:
             assert toss_account.is_final(status) is final, (status, final)
 
 
+# PRD 02 목표 보유
+
+
+def _weekdays(start: str, end: str) -> list[str]:
+    days, day = [], Date.fromisoformat(start)
+    while day <= Date.fromisoformat(end):
+        if day.weekday() < 5:
+            days.append(day.isoformat())
+        day += timedelta(days=1)
+    return days
+
+
+def _period(tmp: Path, start: str, holidays: list[list[str]], today: str) -> v3_daily.Period:
+    (tmp / "v5_period.json").write_text(json.dumps({"start": start}), encoding="utf-8")
+    (tmp / "krx_holidays.csv").write_text("date,reason\n" + "".join(f"{day},{reason}\n" for day, reason in holidays), encoding="utf-8")
+    return v5_target.load_period(tmp / "v5_period.json", tmp / "krx_holidays.csv", today)
+
+
+def _rows(items: list[list[str]]) -> list[dict]:
+    return [{"date": day, "slot": slot, "kind": kind, "status": status, "subordinate": subordinate} for day, slot, kind, status, subordinate in items]
+
+
+def _plain(value: object) -> object:
+    return json.loads(json.dumps(value))
+
+
+@functools.cache
+def _prd02_markets() -> dict:
+    return {name: v4_acceptance._market(spec) for name, spec in _fixture("prd02-target.json")["markets"].items()}
+
+
+def _prd02_subordinates(fixture: dict) -> dict:
+    """v4 부하에 시험용 부하(적은 날짜·시각에 적은 주문을 낸다)를 더한다."""
+    subordinates = dict(v4_paper.SUBORDINATES)
+    for name, test in fixture["tests"].items():
+        script = {(day, clock): engine.Order(kind, symbol, "signal") for day, clock, kind, symbol in test["orders"]}
+        subordinates[name] = v3_paper.Subordinate(lambda script=script: lambda view: script.get((view.date, view.time)), test["overnight"], None)
+    return subordinates
+
+
+def _prd02_target(fixture: dict, case: dict, bars: dict | None = None, received: dict | None = None) -> v5_target.Target:
+    full = _prd02_markets()[case["market"]]
+    base = full._replace(days=[day for day in full.days if day < case["today"]])
+    today = bars or {symbol: full.bars[symbol].get(case["today"], []) for symbol in v5_target.SYMBOLS}
+    with tempfile.TemporaryDirectory() as name:
+        period = _period(Path(name), fixture["start"], fixture["holidays"], case["today"])
+    decisions = _rows(fixture["decisions"][case["decisions"]])
+    return v5_target.target(
+        base, period, decisions, case["today"], case["kind"], case["bar"], today, received or fixture["received"], _prd02_subordinates(fixture)
+    )
+
+
+def case_target_states() -> None:
+    fixture = _prd02()
+    for case in fixture["cases"]:
+        result = _prd02_target(fixture, case)
+        assert result.reason is None and result.symbol == case["symbol"] and _plain(result.state) == case["state"], (case["name"], result)
+    case = next(case for case in fixture["cases"] if case["name"] == fixture["future"]["case"])
+    full = _prd02_markets()[case["market"]]
+    changed = {
+        symbol: [
+            market_bar._replace(**dict(zip(("open", "high", "low", "close", "volume"), fixture["future"]["bars"].get(symbol, {}).get(market_bar.time, list(market_bar)[1:]))))
+            for market_bar in full.bars[symbol][case["today"]]
+        ]
+        for symbol in v5_target.SYMBOLS
+    }
+    result = _prd02_target(fixture, case, changed)
+    assert result.symbol == case["symbol"] and _plain(result.state) == case["state"], ("그 봉 뒤의 시세를 바꿈", result)
+
+
+def _prd02() -> dict:
+    return _fixture("prd02-target.json")
+
+
+def case_target_sixth_day() -> None:
+    fixture = _prd02()["sixth"]
+    expected, today = fixture["expected"], fixture["today"]
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        history = _weekdays(fixture["history"]["from"], fixture["history"]["to"])
+        settled = [row[0] for row in fixture["decisions"]]
+        spec = {"fetched_at": f"{today}T07:00:00+09:00", "volume": 1000, "days": [{"date": history[0], "prices": fixture["history"]["prices"]}]}
+        spec["days"] += [{"date": day} for day in history[1:] + settled]
+        fixtures.build(spec, tmp / "market.sqlite3")
+        with closing(sqlite3.connect(tmp / "us.sqlite3")) as db, db:
+            db.execute(f"CREATE TABLE us_candles_1d ({v3_us.TABLE})")
+            rows = [(symbol, day, price) for day in _weekdays(fixture["us"]["from"], fixture["us"]["to"]) for symbol, price in fixture["us"]["prices"].items()]
+            db.executemany("INSERT INTO us_candles_1d VALUES (?, ?, ?)", rows)
+        paths = v4_daily.Paths(tmp / "market.sqlite3", tmp / "market.sqlite3", tmp / "paper.sqlite3", tmp / "head", tmp / "news", tmp / "us.sqlite3")
+        for row in _rows(fixture["decisions"]):
+            v4_head.insert(paths.paper, dict.fromkeys(v4_head.COLUMNS, "") | {"attempts": 0} | row)
+        with closing(sqlite3.connect(paths.paper)) as db, db:
+            db.execute(f"CREATE TABLE settled_days ({v3_daily.SETTLED})")
+            db.executemany("INSERT INTO settled_days VALUES (?, ?)", [(day, "") for day in settled])
+        period = _period(tmp, fixture["start"], [], today)
+        decisions = v4_head.read(paths.paper)
+        cal = v3_daily.calendar(v3_daily.data_days(paths.source), period)
+        accounts = v4_daily.summary(paths, period, cal, today, decisions)
+        month = [day for day in cal if day[:7] == today[:7]]
+        content = v4_head.build_input(today, "08:50", period.days, month, paths.source, paths.us, accounts, decisions, None, None)
+        data = v3_daily.settled_data(paths, settled)
+        state: dict = {}
+        records = v4_paper.simulate(data, cal, period.start, period.final_day, v4_head.plan([day for day in period.days if day <= settled[-1]], decisions), state=state)
+    head = content["head_account"]
+    assert {"subordinate": head["subordinate"], "holding": head["holding"]} == expected["head_account"], head
+    assert content["decision"] == expected["decision"], content["decision"]
+    assert len(content["recent_decisions"]) == expected["recent_decisions"] and content["settled_through"] == expected["settled_through"], content
+    ids = [row["id"] for row in json.loads((ROOT / "src" / "rt_trading" / "v4_subordinates.json").read_text(encoding="utf-8"))]
+    assert [item["id"] for item in content["subordinates"]] == ids, content["subordinates"]
+    assert v4_head.PROMPT == (ROOT / "src" / "rt_trading" / "v4_head_prompt.txt").read_text(encoding="utf-8") and codex.MODEL == expected["model"]
+    assert not [fill for fill in records.fills if fill.reason == "close"], records.fills
+    assert _plain(state["holding"]) == expected["holding_after_fifth_day"] and settled[-1] not in records.closes, (state, records.closes)
+
+
+def case_target_base() -> None:
+    fixture = _prd02()
+    for base, day, expected in fixture["limits"]:
+        assert list(v5_target.limits(base, day)) == expected, (base, day, v5_target.limits(base, day))
+    case = fixture["cases"][0]
+    result = _prd02_target(fixture, case, received=fixture["one_tick_off"])
+    assert result == (None, "base_changed", None), result
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        fixtures.build(fixture["markets"]["flat"], tmp / "market.sqlite3")
+        paths = v4_daily.Paths(tmp / "market.sqlite3", tmp / "v5" / "market.sqlite3", tmp / "v5" / "paper.sqlite3", tmp / "v5" / "head", tmp / "v5" / "news", tmp / "us.sqlite3")
+        start = _period(tmp, fixture["start"], fixture["holidays"], fixture["start"])
+        source = v5_target.base(paths, start, fixture["start"])
+        assert source is not None and source.days[-1] == "2025-10-29", source and source.days
+        bars = {symbol: _prd02_markets()["flat"].bars[symbol][fixture["start"]] for symbol in v5_target.SYMBOLS}
+        result = v5_target.target(source, start, _rows(fixture["decisions"][case["decisions"]]), fixture["start"], "intraday", "10:04", bars, fixture["received"])
+        assert result.reason is None and result.symbol is None, result
+        later = _period(tmp, fixture["start"], fixture["holidays"], "2025-10-31")
+        assert v5_target.base(paths, later, "2025-10-31") is None
+
+
 CASES = {
     "01": [
         ("계좌·보유·매수 가능 금액·수수료율·상하한가·주문 생성·취소·상세·목록의 주소·쿼리·두 헤더·본문, 계좌번호는 끝 네 자리만, 인증 정보·계좌번호·토큰이 출력과 파일에 없음", case_client_requests),
@@ -265,6 +404,20 @@ CASES = {
             " 취소 응답은 주문을 끝내지 않고 is_final은 FILLED·CANCELED·REJECTED만",
             case_order_errors,
         ),
+    ],
+    "02": [
+        (
+            "목표와 엔진 상태: 장중 교체 전·교체·체결 뒤, 하루 한도 매도와 체결 뒤(한도 알림, 다시 사지 않음), 마감 10분 전 overnight 매수, 하루 안에 끝나는 부하의"
+            " 장중 보유와 종가 차례 청산, 개장 전 보유 부하 매수와 교체(오늘 봉 없이), 장중 교체의 판 뒤 삼, 다음 달 거래일이 있어야 사는 월말 turn_of_month,"
+            " 그 봉 뒤의 시세를 바꿔도 같음",
+            case_target_states,
+        ),
+        (
+            "여섯 번째 거래일 개장 전 입력: 헤드 계좌 부하·보유, 지금 부하·남은 교체, 지난 판단 수, 정산한 마지막 날, 부하 목록·지시문·모델이 v4와 같음,"
+            " 다섯 번째 날·데이터 마지막 날 청산 없음, state를 주면 오늘 마감 자산이 closes에 없음",
+            case_target_sixth_day,
+        ),
+        ("상·하한가 계산(1원·5원 호가 경계와 2023-12-11 전), 한 호가 다르면 base_changed, v5 시작일은 원본 시세로 목표를 정하고 다른 날 정산이 없으면 None", case_target_base),
     ],
 }
 

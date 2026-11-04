@@ -43,8 +43,12 @@ def simulate(
     final_day: str,
     schedule: Schedule,
     subordinates: dict[str, v3_paper.Subordinate] = SUBORDINATES,
+    state: dict | None = None,
 ) -> engine.Records:
-    """계좌 하나를 기간 첫날부터 데이터 마지막 날까지 돌린다. 교체 시각 t의 교체는 t 봉에서 하고 t보다 늦은 봉부터 새 부하를 쓴다."""
+    """계좌 하나를 기간 첫날부터 데이터 마지막 날까지 돌린다. 교체 시각 t의 교체는 t 봉에서 하고 t보다 늦은 봉부터 새 부하를 쓴다.
+
+    state는 엔진에 그대로 넘긴다(v5 PRD 02).
+    """
     used = effective(data, start, schedule)
     days = list(used)
     instances = {name: subordinate.make() for name, subordinate in subordinates.items()}  # 부하마다 전략 객체 하나
@@ -81,6 +85,7 @@ def simulate(
         overnight_on=overnight_on,
         pre_open=pre_open,
         switch=switch,
+        state=state,
     )
 
 

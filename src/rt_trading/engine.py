@@ -107,6 +107,7 @@ def run(
     overnight_on: Callable[[str], bool] | None = None,
     pre_open: Callable[[View], PreOpen | None] | None = None,
     switch: Callable[[View], PreOpen | None] | None = None,
+    state: dict | None = None,
 ) -> Records:
     """start 거래일부터 마지막 거래일까지 분마다 PRD 03의 순서로 처리한다.
 
@@ -114,11 +115,14 @@ def run(
     v3 PRD 02의 선택 인자: calendar는 전략에 넘기는 달력, final_day는 마지막 거래일로 볼 날(데이터에 없으면 어느 날도 아니다),
     overnight_on은 날짜별 며칠 보유 방식, pre_open은 날마다 첫 봉 전에 부르는 개장 전 처리다. 주지 않으면 지금과 같다.
     v4 PRD 03의 선택 인자: switch는 봉마다 손실 한도 확인 뒤 전략 전에 부르는 장중 교체다. 교체를 돌려준 봉에서는 전략을 부르지 않는다.
+    v5 PRD 02의 선택 인자: state를 주면 마지막 날의 마지막 봉(봉이 없으면 개장 전 처리) 뒤의 holding·buy·sell_reason·limits를 넣고,
+    마지막 날(오늘)의 마감 자산은 closes에 넣지 않는다.
     """
     symbols = sorted(data.bars)  # 입력 순서와 관계없이 같은 결과를 낸다
     defects = set(data.defects)
     records = Records([("", INITIAL_CASH)], {}, [], [], [], [], [])
     cash, holding, sell_reason, buy = INITIAL_CASH, None, None, None
+    equity, daily_hit, weekly_hit = INITIAL_CASH, False, False  # 봉이 없는 첫날(v5 개장 전 다시 돌리기)에도 값이 있게 한다
     past, past_days, adj_closes = {symbol: {} for symbol in symbols}, [], []
     last_close = weekly_base = INITIAL_CASH
     week, cumulative_hit = None, False
@@ -251,11 +255,19 @@ def run(
                         sell_reason = order.reason
                         if order.kind == "switch":
                             buy = _Buy(order.symbol, "switch", order.reason, after_sell=True)
-            records.closes[date] = last_close = equity
+            if state is None or index < len(data.days) - 1:
+                records.closes[date] = last_close = equity
         for symbol in symbols:
             past[symbol][date] = data.bars[symbol].get(date, [])
         past_days.append(date)
         adj_closes.append(data.daily[KODEX200][date][1])
+    if state is not None:
+        state.update(
+            holding=(holding.symbol, holding.quantity) if holding else None,
+            buy=(buy.symbol, buy.after_sell) if buy else None,
+            sell_reason=sell_reason,
+            limits={"daily": daily_hit, "weekly": weekly_hit, "cumulative": cumulative_hit},
+        )
     return records
 
 
