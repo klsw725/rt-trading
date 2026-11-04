@@ -32,6 +32,8 @@ from rt_trading import (
     v4_news,
     v4_report,
     v4_serve,
+    v5_live,
+    v5_target,
     web_acceptance,
 )
 
@@ -43,6 +45,13 @@ V3_PATHS = v3_daily.Paths(DB_PATH, V3_DIR / "market.sqlite3", V3_DIR / "paper.sq
 V4_DIR = ROOT / "data" / "v4"
 V4_PATHS = v4_daily.Paths(
     DB_PATH, V4_DIR / "market.sqlite3", V4_DIR / "paper.sqlite3", V4_DIR / "head", V4_DIR / "news", ROOT / "data" / "us.sqlite3"
+)
+V5_DIR = ROOT / "data" / "v5"
+V5_PATHS = v4_daily.Paths(
+    DB_PATH, V5_DIR / "market.sqlite3", V5_DIR / "paper.sqlite3", V5_DIR / "head", V5_DIR / "news", ROOT / "data" / "us.sqlite3"
+)
+V5_LIVE = v5_live.Paths(
+    V5_PATHS, V5_DIR / "live.sqlite3", V5_DIR / "config.json", V5_DIR / "live.lock", V5_DIR / "order.lock", v5_target.PERIOD, v3_daily.HOLIDAYS
 )
 SYMBOLS = ("069500", "114800")
 SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
@@ -80,6 +89,13 @@ def main() -> None:
     commands.add_parser("web-acceptance", help="현황 웹페이지 모양(web SPEC) acceptance를 네트워크 없이 실행한다")
     v5_checks = commands.add_parser("v5-acceptance", help="v5 acceptance를 네트워크 없이 실행한다")
     v5_checks.add_argument("--prd", choices=sorted(v5_acceptance.CASES))
+    commands.add_parser("v5-live", help="v5 실계좌 실행기: 그날 끝 차례까지 목표 보유를 실계좌에 맞춘다")
+    v5_stop = commands.add_parser("v5-stop", help="v5 실행기를 멈춘다(보유 그대로). --sell이면 멈추고 다 판다")
+    v5_stop.add_argument("--sell", action="store_true")
+    v5_resume = commands.add_parser("v5-resume", help="v5 정지를 푼다. --new-ledger면 실장부를 예산으로 새로 시작하고 푼다")
+    v5_resume.add_argument("--new-ledger", action="store_true")
+    v5_check = commands.add_parser("v5-check", help="토스 계좌를 조회한다. --order면 사람이 지켜보는 실주문 점검을 한다")
+    v5_check.add_argument("--order", action="store_true")
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -115,6 +131,10 @@ def main() -> None:
         sys.exit(web_acceptance.run())
     if args.command == "v5-acceptance":
         sys.exit(v5_acceptance.run(args.prd))
+    if args.command == "v5-stop":
+        sys.exit(v5_live.stop(V5_LIVE, args.sell, lambda: datetime.now(toss.KST)))
+    if args.command in ("v5-live", "v5-resume", "v5-check"):
+        sys.exit(run_v5_live(args))
     sys.exit(v0.check() if args.command == "v0-check" else v0_acceptance.run())
 
 
@@ -185,6 +205,18 @@ def run_v4_decide(slot: str) -> int:
         return v4_daily.decide(
             V4_PATHS, v4_daily.PERIOD, v3_daily.HOLIDAYS, slot, bars, news, http, lambda: codex.credentials(codex.TOKEN_DIR), clock, time.sleep
         )
+
+
+def run_v5_live(args: argparse.Namespace) -> int:
+    """v5-live, v5-resume, v5-check. 토스 호출은 서버의 함께 쓰는 토큰을 쓴다."""
+    clock = lambda: datetime.now(toss.KST)
+    with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
+        token = shared_token(http)
+        if args.command == "v5-live":
+            return v5_live.Live(V5_LIVE, http, token, clock, time.sleep).run()
+        if args.command == "v5-resume":
+            return v5_live.resume(V5_LIVE, http, token, clock, time.sleep, args.new_ledger)
+        return v5_live.check(V5_LIVE, http, token, clock, time.sleep, args.order)
 
 
 def run_backtest(db_path: Path, report_dir: Path, clock: Callable[[], datetime]) -> int:

@@ -1,6 +1,7 @@
 """v5 acceptance. PRD별 사례를 네트워크 없이 실행하고 결과를 JSON으로 출력한다."""
 
 import contextlib
+import fcntl
 import functools
 import io
 import json
@@ -9,6 +10,7 @@ import sqlite3
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from contextlib import closing
 from datetime import date as Date
 from datetime import datetime, timedelta
@@ -17,7 +19,24 @@ from unittest import mock
 
 import httpx
 
-from rt_trading import cli, codex, engine, fixtures, toss, toss_account, v3_daily, v3_paper, v3_us, v4_acceptance, v4_daily, v4_head, v4_paper, v5_target
+from rt_trading import (
+    cli,
+    codex,
+    engine,
+    fixtures,
+    toss,
+    toss_account,
+    v3_daily,
+    v3_paper,
+    v3_us,
+    v4_acceptance,
+    v4_daily,
+    v4_head,
+    v4_paper,
+    v5_book,
+    v5_live,
+    v5_target,
+)
 from rt_trading.toss import KST
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -390,6 +409,595 @@ def case_target_base() -> None:
         assert v5_target.base(paths, later, "2025-10-31") is None
 
 
+# PRD 03 실계좌 실행기
+
+
+class _Broker:
+    """가짜 토스 계좌. 같은 clientOrderId는 같은 주문이다. 주문 결과(post)와 체결(fill)은 사례가 정한다.
+
+    post 차례: "ok", "network"(받지 않음), "lost"(받고 응답만 잃음), [상태, 본문](오류 응답).
+    """
+
+    def __init__(self, spec: dict, limits: dict, commission: str) -> None:
+        self.holdings = {"069500": 0, "114800": 0} | spec.get("holdings", {})
+        self.power, self.limits, self.commission = spec.get("power", 1_000_000), limits, commission
+        self.script = list(spec.get("post", []))
+        self.foreign = list(spec.get("foreign", []))
+        self.orders: dict[str, dict] = {}
+        self.clients: dict[str, str] = {}
+        self.posts: list[list] = []
+        self.cancels: list[str] = []
+        self.on_post: list = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path, method = request.url.path, request.method
+        if path == "/api/v1/accounts":
+            return httpx.Response(200, json={"result": [{"accountNo": "98765432101", "accountSeq": 3, "accountType": "BROKERAGE"}]})
+        if path == "/api/v1/holdings":
+            return httpx.Response(200, json={"result": {"items": [{"symbol": symbol, "quantity": str(count)} for symbol, count in self.holdings.items() if count]}})
+        if path == "/api/v1/buying-power":
+            return httpx.Response(200, json={"result": {"currency": "KRW", "cashBuyingPower": str(self.power)}})
+        if path == "/api/v1/commissions":
+            return httpx.Response(200, json={"result": [{"marketCountry": "KR", "commissionRate": self.commission}]})
+        if path == "/api/v1/price-limits":
+            upper, lower = self.limits[request.url.params["symbol"]]
+            return httpx.Response(200, json={"result": {"upperLimitPrice": str(upper), "lowerLimitPrice": str(lower), "currency": "KRW"}})
+        if path == "/api/v1/orders" and method == "GET":
+            symbol = request.url.params["symbol"]
+            found = [
+                {"orderId": order_id, "symbol": order["symbol"], "side": order["side"], "quantity": str(order["quantity"]), "status": order["status"]}
+                for order_id, order in self.orders.items()
+                if order["symbol"] == symbol and order["status"] in ("PENDING", "PARTIAL_FILLED", "PENDING_CANCEL")
+            ]
+            found += [item for item in self.foreign if item["symbol"] == symbol]
+            return httpx.Response(200, json={"result": {"orders": found, "nextCursor": None, "hasNext": False}})
+        if path == "/api/v1/orders" and method == "POST":
+            return self._post(request)
+        if path.endswith("/cancel"):
+            order_id = path.split("/")[-2]
+            self.cancels.append(order_id)
+            order = self.orders[order_id]
+            if order["status"] in ("PENDING", "PARTIAL_FILLED"):
+                order["status"] = "CANCELED"
+                return httpx.Response(200, json={"result": {"orderId": order_id}})
+            return httpx.Response(409, json={"error": {"code": "already-filled", "message": "x"}})
+        order = self.orders[path.split("/")[-1]]
+        execution = {key: order[key] for key in ("filledQuantity", "filledAmount", "averageFilledPrice", "commission", "tax")}
+        return httpx.Response(200, json={"result": {"orderId": path.split("/")[-1], "symbol": order["symbol"], "side": order["side"], "status": order["status"], "quantity": str(order["quantity"]), "execution": execution}})
+
+    def _post(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        self.posts.append([body["clientOrderId"], body["symbol"], body["side"], body["timeInForce"], body["quantity"]])
+        for check in self.on_post:
+            check(body)
+        action = self.script.pop(0) if self.script else "ok"
+        if action == "network":
+            raise httpx.ConnectError("가짜 연결 오류", request=request)
+        if isinstance(action, list):
+            return httpx.Response(action[0], json=action[1], headers=action[2] if len(action) > 2 else None)
+        order_id = self.clients.get(body["clientOrderId"])
+        if order_id is None:
+            order_id = self.clients[body["clientOrderId"]] = f"ord-{len(self.clients) + 1}"
+            self.orders[order_id] = {
+                "symbol": body["symbol"], "side": body["side"], "quantity": int(body["quantity"]), "status": "PENDING",
+                "filledQuantity": "0", "filledAmount": None, "averageFilledPrice": None, "commission": None, "tax": None,
+            }
+        if action == "lost":
+            raise httpx.ConnectError("가짜 응답 잃음", request=request)
+        return httpx.Response(200, json={"result": {"orderId": order_id, "clientOrderId": body["clientOrderId"]}})
+
+    def fill(self, client_order_id: str, status: str, quantity: int, amount: int | None, commission: int | None, tax: int | None) -> None:
+        order = self.orders[self.clients[client_order_id]]
+        before = int(order["filledQuantity"])
+        order |= {
+            "status": status, "filledQuantity": str(quantity), "filledAmount": None if amount is None else str(amount),
+            "averageFilledPrice": None if not quantity or amount is None else str(amount / quantity), "commission": None if commission is None else str(commission),
+            "tax": None if tax is None else str(tax),
+        }
+        self.holdings[order["symbol"]] += (quantity - before) * (1 if order["side"] == "BUY" else -1)
+
+
+class _LiveClock:
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += timedelta(seconds=seconds)
+
+
+class _LiveCase:
+    """임시 폴더의 v5 저장소와 가짜 토스·시계·목표·봉으로 실행기 하나를 만든다. 차례는 사례가 하나씩 부른다."""
+
+    def __init__(self, fixture: dict, tmp: Path, scenario: dict, config: dict | None = None, broker: dict | None = None) -> None:
+        self.fixture, self.tmp, self.day = fixture, tmp, fixture["day"]
+        self.prices = dict(fixture["prices"])
+        self.broker = _Broker(scenario.get("broker", {}) | (broker or {}), fixture["limits"], fixture["commission"])
+        self.clock = _LiveClock(_time(f"{self.day}T08:00:00"))
+        self.config = fixture["config"] | (config or {})
+        (tmp / "config.json").write_text(json.dumps(self.config), encoding="utf-8")
+        (tmp / "v5_period.json").write_text(json.dumps({"start": self.day}), encoding="utf-8")
+        (tmp / "krx_holidays.csv").write_text("date,reason\n", encoding="utf-8")
+        daily = v4_daily.Paths(tmp / "market.sqlite3", tmp / "v5" / "market.sqlite3", tmp / "v5" / "paper.sqlite3", tmp / "v5" / "head", tmp / "v5" / "news", tmp / "us.sqlite3")
+        self.paths = v5_live.Paths(daily, tmp / "live.sqlite3", tmp / "config.json", tmp / "live.lock", tmp / "order.lock", tmp / "v5_period.json", tmp / "krx_holidays.csv")
+        self.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(self.broker))
+        self.goal: v5_target.Target = v5_target.Target(None, None, {})
+        self.live = self.executor()
+        ledger = scenario.get("ledger")
+        with v5_book.connect(self.paths.live) as db:
+            if ledger is not None:
+                ledger_id = v5_book.create_ledger(db, "live", self.config["account_seq"], self.config["budget"], self.clock())
+                spent = self.config["budget"] - ledger["cash"]
+                for symbol in v5_target.SYMBOLS:
+                    if ledger.get(symbol):
+                        db.execute(
+                            "INSERT INTO entries (ledger_id, time, reason, cash, symbol, quantity) VALUES (?, ?, 'fill', ?, ?, ?)",
+                            (ledger_id, self.clock().isoformat(timespec="seconds"), -spent, symbol, ledger[symbol]),
+                        )
+        if scenario.get("day_row", True):
+            self.open_day(self.day)
+
+    def executor(self) -> v5_live.Live:
+        live = v5_live.Live(self.paths, self.http, "token-x", self.clock, self.clock.sleep, target=lambda *args: self.goal, bars=self._bars)
+        live.today, live.period = self.day, v5_target.load_period(self.paths.period, self.paths.holidays, self.day)
+        live.prices = dict(self.fixture["prices"])
+        return live
+
+    def open_day(self, day: str) -> None:
+        with v5_book.connect(self.paths.live) as db:
+            db.execute(
+                "INSERT INTO days (date, mode, account_seq, limits, commission) VALUES (?, ?, ?, ?, ?)",
+                (day, "live" if self.config["orders"] else "dry", self.config["account_seq"], json.dumps(self.fixture["limits"]), self.fixture["commission"]),
+            )
+
+    def _bars(self, day: str) -> dict[str, list]:
+        """지금 시각까지 끝난 장 일정의 봉. 가격은 사례의 가격이다."""
+        times = [time for time in v4_acceptance.sessions.session(day, v4_acceptance.sessions.exceptions()).bars if _time(f"{day}T{time}") <= self.clock.now]
+        return {symbol: [v4_acceptance.market_data.Bar(time, price, price, price, price, 1000) for time in times] for symbol, price in self.prices.items()}
+
+    def turn(self, name: str) -> list[list]:
+        """그 차례를 한 번 하고, 그 사이 토스로 간 주문 생성 요청을 돌려준다."""
+        found = v5_live.turns(self.live.today)
+        self.current = next(turn for turn in found if turn.name == name or turn.bar == name and turn.name in ("intraday", "closing"))
+        self.clock.now = max(self.clock.now, self.current.at)
+        before = len(self.broker.posts)
+        self.live._turn(self.current)
+        return self.broker.posts[before:]
+
+    def step(self, step: dict) -> None:
+        if "fill" in step:
+            self.broker.fill(*step["fill"])
+            return
+        if step.get("next_day"):
+            self.day = self.fixture["next_day"]
+            self.open_day(self.day)
+            self.live.today, self.live.period = self.day, v5_target.load_period(self.paths.period, self.paths.holidays, self.day)
+        self.goal = v5_target.Target(step.get("target"), step.get("reason"), {})
+        posts = self.turn(step["turn"])
+        assert posts == step["posts"], (step, posts)
+
+    def balance(self, kind: str = "live") -> tuple[int, dict]:
+        with v5_book.connect(self.paths.live) as db:
+            return v5_book.balance(db, v5_book.ledger(db, kind)["id"])
+
+    def stops(self) -> list[dict]:
+        with v5_book.connect(self.paths.live) as db:
+            return v5_book.active_stops(db)
+
+
+def _prd03() -> dict:
+    return _fixture("prd03-live.json")
+
+
+def _scenario(name: str, config: dict | None = None, broker: dict | None = None) -> _LiveCase:
+    fixture, holder = _prd03(), tempfile.TemporaryDirectory()
+    case = _LiveCase(fixture, Path(holder.name), fixture["scenarios"][name], config, broker)
+    case.holder = holder  # 사례 객체가 사라질 때 임시 폴더도 지운다
+    return case
+
+
+def case_live_schedule() -> None:
+    fixture = _prd03()
+    for day, expected in fixture["schedule"].items():
+        found = v5_live.turns(day)
+        intraday = [turn for turn in found if turn.name == "intraday"]
+        closing = next(turn for turn in found if turn.name == "closing")
+        assert len(found) == expected["count"], (day, len(found))
+        assert [f"{found[0].at:%H:%M:%S}", f"{found[1].at:%H:%M:%S}", f"{found[-1].at:%H:%M:%S}"] == [expected["start"], expected["pre_open"], expected["end"]], day
+        assert [intraday[0].bar, f"{intraday[0].at:%H:%M:%S}"] == expected["first"] and [intraday[-1].bar, f"{intraday[-1].at:%H:%M:%S}"] == expected["last"], day
+        assert [closing.bar, f"{closing.at:%H:%M:%S}"] == expected["closing"], day
+
+
+def case_live_sell_then_buy() -> None:
+    fixture = _prd03()
+    for name in ("sell_then_buy_open", "sell_close_buy_next_open", "quantity"):
+        case = _scenario(name)
+        for step in fixture["scenarios"][name]["steps"]:
+            case.step(step)
+        cash, held = case.balance()
+        expected = fixture["scenarios"][name]["balance"]
+        assert [cash, held] == [expected["cash"], expected["holdings"]], (name, cash, held)
+        assert not case.stops(), (name, case.stops())
+    for variant in ("max_shares", "unlimited"):
+        item = fixture["scenarios"]["quantity"][variant]
+        case = _scenario("quantity", {"max_shares": item["config"]} if "config" in item else None, {"power": item["power"]} if "power" in item else None)
+        case.step({"turn": item["turn"], "target": item["target"], "posts": item["posts"]})
+
+
+def _orders(case: _LiveCase, where: str = "1") -> list[dict]:
+    with v5_book.connect(case.paths.live) as db:
+        return v5_book.orders(db, where)
+
+
+def case_live_duplicates() -> None:
+    fixture = _prd03()["scenarios"]
+    case = _scenario("lost")
+    case.goal = v5_target.Target("069500", None, {})
+    assert case.turn("09:01") == [fixture["lost"]["order"]], case.broker.posts
+    assert _orders(case)[0]["status"] == "unknown"
+    case.clock.now += timedelta(seconds=10)
+    case.live._between()
+    assert case.broker.posts == [fixture["lost"]["order"]] * 2 and len(case.broker.orders) == 1, case.broker.posts
+    assert [order["status"] for order in _orders(case)] == ["open"], _orders(case)
+
+    case = _scenario("lost")
+    case.goal = v5_target.Target("069500", None, {})
+    case.turn("09:01")
+    case.live = case.executor()
+    case.live._between()
+    assert case.broker.posts == [fixture["lost"]["order"]] * 2 and len(case.broker.orders) == 1 and _orders(case)[0]["status"] == "open", "다시 켜진 뒤"
+
+    for name in ("never", "rate_limited"):
+        case = _scenario(name)
+        case.goal = v5_target.Target("069500", None, {})
+        case.turn("09:01")
+        limit = case.clock.now + timedelta(minutes=8)
+        while case.clock.now < limit + timedelta(seconds=30):
+            case.clock.now += timedelta(seconds=5)
+            case.live._between()
+        assert len(case.broker.posts) == fixture[name]["posts_in_8_minutes"], (name, len(case.broker.posts))
+        assert [stop["kind"] for stop in case.stops()] == ["manual"], (name, case.stops())
+
+    case = _scenario("lost")
+    case.goal = v5_target.Target("069500", None, {})
+    case.turn("09:01")
+    v5_live.stop(case.paths, False, case.clock)
+    case.clock.now += timedelta(seconds=10)
+    case.live._between()
+    assert len(case.broker.posts) == 1 and {stop["kind"] for stop in case.stops()} == {"human", "manual"}, ("다시 보내기 전 정지", case.stops())
+
+    case = _scenario("duplicate_turn")
+    case.goal = v5_target.Target("069500", None, {})
+    assert case.turn("09:01") == [fixture["duplicate_turn"]["first"]]
+    case.broker.fill(*fixture["duplicate_turn"]["fill"])
+    case.live = case.executor()
+    case.goal = v5_target.Target(None, None, {})
+    assert case.turn("09:01") == [] and case.balance()[1] == {"069500": 38}, case.broker.posts
+
+    case = _scenario("foreign")
+    case.goal = v5_target.Target("069500", None, {})
+    assert case.turn("09:01") == [] and [stop["kind"] for stop in case.stops()] == ["safety"], case.stops()
+
+    case = _scenario("lost")
+    with open(case.paths.lock, "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            assert case.live.run() == 1 and "V5_LIVE_RUNNING" in output.getvalue(), output.getvalue()
+        fcntl.flock(held, fcntl.LOCK_UN)
+
+    item = fixture["late_start"]
+    case = _scenario("late_start")
+    case.clock.now = _time(item["start_at"])
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert case.live.run() == 0
+    with v5_book.connect(case.paths.live) as db:
+        done = [row["turn"] for row in db.execute("SELECT turn FROM turns ORDER BY rowid")]
+    assert done == item["turns"], done
+
+
+def case_live_stops() -> None:
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+
+    def stop_then_target(*args: object) -> v5_target.Target:
+        v5_live.stop(case.paths, False, case.clock)
+        return v5_target.Target("069500", None, {})
+
+    case.live.target = stop_then_target
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert case.turn("09:01") == [], "주문 직전 정지"
+    case = _scenario("lost", broker={"post": []})
+    case.goal = v5_target.Target("069500", None, {})
+    case.turn("09:01")
+    with contextlib.redirect_stdout(io.StringIO()):
+        v5_live.stop(case.paths, False, case.clock)
+    case.clock.now += timedelta(seconds=5)
+    case.live._between()
+    assert case.broker.cancels == ["ord-1"], ("차례 사이 정지는 5초 안에 봇 주문 취소", case.broker.cancels)
+    assert case.turn("09:02") == [], "멈춤 중에는 주문 없음"
+
+    fixture = _prd03()["scenarios"]
+    for sell, posts in ((True, fixture["sell_stop"]["posts"]), (False, [])):
+        case = _scenario("sell_stop")
+        _quiet(v5_live.stop, case.paths, sell, case.clock)
+        case.goal = v5_target.Target("069500", None, {})
+        assert _quiet(case.turn, "09:01") == posts, ("멈추고 다 팔기" if sell else "멈춤", case.broker.posts)
+
+    case = _scenario("sell_stop", broker={"holdings": {"069500": 9, "114800": 0}})
+    case.goal = v5_target.Target(None, None, {})
+    assert _quiet(case.turn, "09:01") == [] and [stop["kind"] for stop in case.stops()] == ["safety"], ("실계좌 수량이 장부와 다름", case.stops())
+
+    item = fixture["rejected"]
+    case = _scenario("rejected")
+    case.goal = v5_target.Target("069500", None, {})
+    for index, (turn, count) in enumerate(zip(item["turns"], item["posts"], strict=True)):
+        if index == 2:
+            case.live = case.executor()
+        assert len(_quiet(case.turn, turn)) == count, (turn, case.broker.posts)
+    assert [stop["kind"] for stop in case.stops()] == ["safety"], ("거부 세 번", case.stops())
+
+
+def case_live_fills() -> None:
+    fixture = _prd03()["scenarios"]
+    item = fixture["partial"]
+    case = _scenario("partial")
+    case.goal = v5_target.Target("069500", None, {})
+    assert case.turn("09:01") == [item["first"]]
+    case.broker.fill(*item["fill"])
+    assert case.turn("09:02") == [] and case.broker.cancels == ["ord-1"], case.broker.cancels
+    assert list(case.balance()) == [item["after_partial"]["cash"], item["after_partial"]["holdings"]], case.balance()
+    assert case.turn("09:03") == [] and not case.stops(), case.stops()
+    case.broker.orders["ord-1"]["commission"] = str(item["late_fee"])
+    with v5_book.connect(case.paths.live) as db:
+        entries = db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+    case.turn("end")
+    case.live._apply(_orders(case)[0])
+    with v5_book.connect(case.paths.live) as db:
+        after = db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+    assert list(case.balance()) == [item["after_fee"]["cash"], item["after_fee"]["holdings"]] and after == entries + 1, (case.balance(), entries, after)
+
+    item = fixture["auction"]
+    case = _scenario("auction")
+    case.goal = v5_target.Target("069500", None, {})
+    assert case.turn("pre_open") == [item["pre_open"]]
+    case.clock.now = _time(f"{case.day}T08:58:00")
+    case.live._between()
+    assert case.broker.cancels == [], "개장 전 주문을 개장 전에 취소함"
+    case.turn("09:01")
+    assert case.broker.cancels == ["ord-1"], "개장 뒤 남은 개장 전 주문을 취소하지 않음"
+    case = _scenario("auction")
+    case.goal = v5_target.Target("069500", None, {})
+    assert case.turn("closing") == [item["closing"]]
+    case.clock.now = _time(f"{case.day}T15:25:00")
+    case.live._between()
+    case.turn("end")
+    assert case.broker.cancels == [], "종가 차례 주문을 마감 전에 취소함"
+
+    case = _scenario("replaced")
+    case.goal = v5_target.Target("069500", None, {})
+    case.turn("09:01")
+    case.broker.orders["ord-1"]["status"] = fixture["replaced"]["status"]
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert case.turn("09:02") == [] and [stop["kind"] for stop in case.stops()] == ["safety"], case.stops()
+
+
+def case_live_limits() -> None:
+    item = _prd03()["scenarios"]["limits"]
+    for name in ("daily", "above_daily", "base_changed", "weekly", "cumulative"):
+        case = _scenario("limits")
+        fixtures.build(item["source"], case.paths.daily.source)
+        if "limits" in item[name]:
+            with v5_book.connect(case.paths.live) as db:
+                db.execute("UPDATE days SET limits = ? WHERE date = ?", (json.dumps(item[name]["limits"]), case.day))
+        case.prices["069500"] = item[name]["price"]
+        case.goal = v5_target.Target("069500", None, {})
+        assert case.turn("09:01") == item[name]["posts"], (name, case.broker.posts)
+        with v5_book.connect(case.paths.live) as db:
+            latches = [[row[0], row[1]] for row in db.execute("SELECT kind, period FROM latches WHERE kind != 'rejections' ORDER BY kind")]
+        assert latches == item[name].get("latches", []), (name, latches)
+        assert [[stop["kind"], stop["mode"]] for stop in case.stops()] == ([item[name]["stop"]] if "stop" in item[name] else []), (name, case.stops())
+        if name == "daily":
+            case.broker.fill(*item["fill"])
+            assert case.turn("09:02") == [], "하루 한도 뒤 다시 삼"
+            case.live = case.executor()
+            assert case.turn("09:03") == [], "다시 켜진 뒤 하루 한도를 잊음"
+
+
+def _quiet(function: object, *args: object) -> int:
+    with contextlib.redirect_stdout(io.StringIO()):
+        return function(*args)
+
+
+def case_live_resume() -> None:
+    case = _scenario("resume")
+    with v5_book.connect(case.paths.live) as db:
+        v5_book.add_stop(db, "manual", "hold", "수동 확인 필요", case.clock())
+    assert _quiet(v5_live.resume, case.paths, case.http, "token-x", case.clock, case.clock.sleep, False) == 1 and case.stops(), "manual은 v5-resume으로 풀리지 않음"
+
+    case = _scenario("resume", broker={"holdings": {"069500": 9, "114800": 0}})
+    _quiet(v5_live.stop, case.paths, False, case.clock)
+    assert _quiet(v5_live.resume, case.paths, case.http, "token-x", case.clock, case.clock.sleep, False) == 1 and case.stops(), "장부와 실계좌가 달라도 풂"
+
+    case = _scenario("resume")
+    _quiet(v5_live.stop, case.paths, False, case.clock)
+    original = case.broker.__call__
+
+    def late_stop(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/holdings":
+            _quiet(v5_live.stop, case.paths, True, case.clock)
+        return original(request)
+
+    case.http = httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(late_stop))
+    assert _quiet(v5_live.resume, case.paths, case.http, "token-x", case.clock, case.clock.sleep, False) == 0
+    assert [[stop["id"], stop["mode"]] for stop in case.stops()] == [[2, "sell"]], ("풀기 중에 들어온 정지를 풂", case.stops())
+
+    case = _scenario("new_ledger", config=_prd03()["scenarios"]["new_ledger"]["config"])
+    with v5_book.connect(case.paths.live) as db:
+        v5_book.add_intent(db, {"client_order_id": "v5-x", "kind": "live", "ledger_id": 1, "date": case.day, "turn": "09:01", "symbol": "069500", "side": "BUY", "tif": "DAY", "quantity": 1, "created_at": case.clock().isoformat()})
+        v5_book.update_order(db, "v5-x", status="unknown")
+        v5_book.add_stop(db, "manual", "hold", "수동 확인 필요", case.clock())
+    assert _quiet(v5_live.resume, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 0 and not case.stops(), case.stops()
+    assert _orders(case)[0]["status"] == "abandoned" and list(case.balance()) == [300000, {}], (_orders(case), case.balance())
+    case.live._between()
+    assert case.broker.posts == [], "봉인한 주문을 다시 보냄"
+    other = _scenario("new_ledger")
+    other.paths.config.write_text(json.dumps(other.config | {"account_seq": 4}), encoding="utf-8")
+    assert _quiet(v5_live.resume, other.paths, other.http, "token-x", other.clock, other.clock.sleep, True) == 1, "오늘과 다른 계좌로 새 장부"
+    busy = _scenario("new_ledger", broker={"holdings": {"069500": 1, "114800": 0}})
+    assert _quiet(v5_live.resume, busy.paths, busy.http, "token-x", busy.clock, busy.clock.sleep, True) == 1, "보유가 있는데 새 장부"
+
+
+def case_live_practice() -> None:
+    item = _prd03()["scenarios"]["practice"]
+    case = _scenario("practice", config=item["config"])
+    case.goal = v5_target.Target("069500", None, {})
+    _quiet(case.turn, "start")
+    assert _quiet(case.turn, "09:01") == item["posts"] and case.broker.cancels == [], case.broker.posts
+    order = _orders(case)[0]
+    assert [order[key] for key in ("client_order_id", "kind", "symbol", "side", "tif", "quantity", "status")] == item["dry_order"], order
+    assert list(case.balance("dry")) == [item["dry_balance"]["cash"], item["dry_balance"]["holdings"]], case.balance("dry")
+    with v5_book.connect(case.paths.live) as db:
+        assert v5_book.ledger(db, "live") is None, "연습 장부가 실장부로 넘어감"
+    (case.paths.config).write_text(json.dumps(case.config | {"orders": True}), encoding="utf-8")
+    case.live = case.executor()
+    assert _quiet(case.turn, "09:02") == [] and case.live._day_record()["mode"] == "dry", "그날 중 설정 바꾸기가 그날 동작을 바꿈"
+
+    case = _scenario("create")
+    _quiet(case.turn, "start")
+    with v5_book.connect(case.paths.live) as db:
+        ledger, record = v5_book.ledger(db, "live"), v5_book.day(db, case.day)
+    assert ledger["start_cash"] == 500000 and ledger["account_seq"] == 3 and record["mode"] == "live" and not case.stops(), (ledger, record)
+    case = _scenario("create", broker={"holdings": {"069500": 1, "114800": 0}})
+    _quiet(case.turn, "start")
+    with v5_book.connect(case.paths.live) as db:
+        ledger, record = v5_book.ledger(db, "live"), v5_book.day(db, case.day)
+    assert ledger is None and record["mode"] == "dry" and [stop["kind"] for stop in case.stops()] == ["safety"], (ledger, record)
+
+    case = _scenario("guard", config=_prd03()["scenarios"]["guard"]["config"])
+    _quiet(case.turn, "start")
+    assert case.live._day_record()["mode"] == "live" and [stop["kind"] for stop in case.stops()] == ["safety"], "보유가 있는데 연습 운용으로 돌아감"
+
+    case = _scenario("lost", broker={"post": []})
+    with open(case.paths.order_lock, "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        case.goal = v5_target.Target("069500", None, {})
+        assert _quiet(case.turn, "09:01") == [], "다른 쪽이 주문 잠금을 쥐었는데 주문함"
+        assert _quiet(v5_live.resume, case.paths, case.http, "token-x", case.clock, case.clock.sleep, False) == 1
+        fcntl.flock(held, fcntl.LOCK_UN)
+
+
+def _filling(case: _LiveCase, after_buy: Callable[[], None] | None = None) -> httpx.Client:
+    """점검 주문(v5c-)을 받자마자 다 체결하는 가짜 토스. after_buy는 매수 체결 뒤에 부른다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = case.broker(request)
+        if request.method == "POST" and request.url.path == "/api/v1/orders":
+            body = json.loads(request.content)
+            if body["clientOrderId"].startswith("v5c-") and body["timeInForce"] == "DAY":
+                case.broker.fill(body["clientOrderId"], "FILLED", 1, 10000, 1, 0)
+                if body["side"] == "BUY" and after_buy:
+                    after_buy()
+        return response
+
+    return httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(handler))
+
+
+def case_live_check() -> None:
+    item = _prd03()["scenarios"]["check"]
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["pre_open_at"])
+    assert _quiet(v5_live.check, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 0
+    assert case.broker.posts == item["pre_open_posts"] and case.broker.cancels == ["ord-1"], (case.broker.posts, case.broker.cancels)
+    assert [order["status"] for order in _orders(case)] == ["final"] and _orders(case)[0]["kind"] == "check"
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["intraday_at"])
+    http = _filling(case)
+    assert _quiet(v5_live.check, case.paths, http, "token-x", case.clock, case.clock.sleep, True) == 0
+    assert case.broker.posts == item["intraday_posts"] and case.broker.holdings == {"069500": 0, "114800": 0}, case.broker.posts
+    with v5_book.connect(case.paths.live) as db:
+        assert v5_book.ledger(db, "live") is None and db.execute("SELECT COUNT(*) FROM entries").fetchone()[0] == 0, "점검 주문이 장부에 들어감"
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["intraday_at"])
+    http = _filling(case, lambda: _quiet(v5_live.stop, case.paths, False, case.clock))
+    assert _quiet(v5_live.check, case.paths, http, "token-x", case.clock, case.clock.sleep, True) == 1
+    assert [post[2] for post in case.broker.posts] == ["BUY"], ("매도 직전 정지에도 매도함", case.broker.posts)
+
+    for config, broker in ((None, None), (item["config"], {"holdings": {"069500": 1, "114800": 0}})):
+        case = _scenario("check", config=config, broker=broker)
+        case.clock.now = _time(item["intraday_at"])
+        assert _quiet(v5_live.check, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 1 and case.broker.posts == [], (config, broker)
+
+    case = _scenario("check", config=item["config"])
+    case.clock.now = _time(item["intraday_at"])
+    with open(case.paths.order_lock, "a") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        assert _quiet(v5_live.check, case.paths, case.http, "token-x", case.clock, case.clock.sleep, True) == 1 and case.broker.posts == []
+        fcntl.flock(held, fcntl.LOCK_UN)
+
+
+def case_live_reasons() -> None:
+    item = _prd03()["scenarios"]["reasons"]
+
+    def prepared(**changes: object) -> _LiveCase:
+        case = _scenario("reasons")
+        fixtures.build(item["source"], case.paths.daily.source)
+        v4_head.insert(case.paths.daily.paper, dict.fromkeys(v4_head.COLUMNS, "") | {"attempts": 0} | _rows([item["decision"]])[0])
+        case.live.target = v5_target.target
+        for key, value in changes.items():
+            setattr(case, key, value)
+        return case
+
+    case = prepared()
+    assert _quiet(case.turn, "09:01") == item["computed"], ("목표를 정할 수 있는 날", case.broker.posts)
+
+    def reason(case: _LiveCase) -> str:
+        with v5_book.connect(case.paths.live) as db:
+            return db.execute("SELECT reason FROM turns ORDER BY rowid DESC LIMIT 1").fetchone()[0]
+
+    case = prepared()
+    case.paths.period.write_text(json.dumps({"start": item["early_start"]}), encoding="utf-8")
+    case.live.period = v5_target.load_period(case.paths.period, case.paths.holidays, case.day)
+    assert _quiet(case.turn, "09:01") == [] and reason(case) == "settlement_behind", reason(case)
+
+    case = prepared()
+    with v5_book.connect(case.paths.live) as db:
+        db.execute("UPDATE days SET limits = NULL WHERE date = ?", (case.day,))
+    original = case.broker.__call__
+    case.http = case.live.http = httpx.Client(
+        base_url=toss.BASE_URL,
+        transport=httpx.MockTransport(lambda request: httpx.Response(500, json={}) if request.url.path == "/api/v1/price-limits" else original(request)),
+    )
+    with mock.patch.object(toss, "_sleep", lambda seconds: None):
+        assert _quiet(case.turn, "09:01") == [] and reason(case) == "limits_missing", reason(case)
+
+    case = prepared()
+    with v5_book.connect(case.paths.live) as db:
+        db.execute("UPDATE days SET limits = ? WHERE date = ?", (json.dumps(item["one_tick_off"]), case.day))
+    assert _quiet(case.turn, "09:01") == [] and reason(case) == "base_changed", reason(case)
+
+    case = prepared()
+    full = case._bars
+    case.live.bars = lambda day: {"069500": full(day)["069500"], "114800": [bar for bar in full(day)["114800"] if bar.time != "09:01"]}
+    assert _quiet(case.turn, "09:01") == [] and reason(case) == "bar_missing", reason(case)
+    assert case.clock.now >= _time(f"{case.day}T09:01:40"), ("봉을 +40초까지 기다리지 않음", case.clock.now)
+
+    case = _scenario("quantity")
+    case.goal = v5_target.Target("069500", None, {})
+    _quiet(case.turn, "09:01")
+    case.broker.fill("v5-20251112-0901-069500-B", "FILLED", 23, 230115, 35, 0)
+    _quiet(case.turn, "09:02")
+    with v5_book.connect(case.paths.live) as db:
+        row = dict(db.execute("SELECT * FROM turns ORDER BY rowid DESC LIMIT 1").fetchone())
+    assert json.loads(row["prices"]) == {"069500": 10000, "114800": 1500} and row["cash"] == 269850 and json.loads(row["holdings"]) == {"069500": 23}, row
+    assert row["equity"] == 269850 + 23 * 10000 and json.loads(row["real"]) == {"069500": 23, "114800": 0} and row["matched"] == 1, row
+    assert json.loads(row["limits"]) == {"daily": False, "weekly": False}, row
+
+
 CASES = {
     "01": [
         ("계좌·보유·매수 가능 금액·수수료율·상하한가·주문 생성·취소·상세·목록의 주소·쿼리·두 헤더·본문, 계좌번호는 끝 네 자리만, 인증 정보·계좌번호·토큰이 출력과 파일에 없음", case_client_requests),
@@ -419,6 +1027,55 @@ CASES = {
         ),
         ("상·하한가 계산(1원·5원 호가 경계와 2023-12-11 전), 한 호가 다르면 base_changed, v5 시작일은 원본 시세로 목표를 정하고 다른 날 정산이 없으면 None", case_target_base),
     ],
+    "03": [
+        ("실행 차례: 정상일·10시 개장일·수능일의 시작 점검·개장 전·첫·마지막 장중·종가·끝 차례 시각과 수", case_live_schedule),
+        (
+            "판 뒤에만 삼: 개장 전 OPG 매도 → 개장 뒤 DAY 매수, 종가 DAY 매도 → 끝 차례 주문 없음 → 다음 거래일(수능일 09:55) OPG 매수, 매수 수량이 매수 가능 금액·"
+            "상한가·수수료율(0.0188%)과 max_shares를 넘지 않고, 목표 종목을 들고 있으면 더 사지 않음",
+            case_live_sell_then_buy,
+        ),
+        (
+            "중복 막기: 응답을 잃은 주문은 같은 번호로 다시 보내 주문이 하나(다시 켜져도), 받지 않는 주문은 10초마다 8분까지 48번 보낸 뒤 manual,"
+            " 429 Retry-After가 8분을 넘으면 8분에 manual, 다시 보내기 전 정지면 보내지 않고 manual, 같은 차례 두 번째 실주문 없음, 모르는 대기 주문은 안전 정지,"
+            " 두 번째 실행기는 바로 끝남, 늦게 켜지면 밀린 차례를 건너뜀",
+            case_live_duplicates,
+        ),
+        (
+            "정지: 주문 직전에 들어온 정지는 그 주문을 막고, 차례 사이 정지는 5초 안에 봇 주문을 취소하며, 멈춤 중에는 주문 없음, 멈추고 다 팔기는 다음 차례에 팖,"
+            " 실계좌 수량이 장부와 다르면 안전 정지, 거부가 세 번 이어지면 안전 정지(다시 켜져도 센 것이 이어짐)",
+            case_live_stops,
+        ),
+        (
+            "체결과 취소: 부분 체결분이 장부에 들어가고 다음 장중 차례에 남은 주문을 취소, 같은 상태를 다시 받아도 한 번, 늦은 수수료는 차이만,"
+            " 개장 전 주문은 개장 전에·종가 차례 주문은 마감 전에 취소하지 않음, 정정 상태는 안전 정지",
+            case_live_fills,
+        ),
+        (
+            "실계좌 손실 한도: 정확히 −2%면 하루 한도로 팔고 그날 다시 사지 않으며 다시 켜져도 이어짐, 9,805원은 발동 안 함, 기준가가 다른 날은 하루 한도를 보지 않고"
+            " 정확히 −5%면 한 주 한도, 정확히 −20%면 누적 한도로 멈추고 다 팖",
+            case_live_limits,
+        ),
+        (
+            "풀기: manual과 장부·실계좌 차이에서는 풀지 않고, 풀기 중에 들어온 정지는 남김, --new-ledger는 결과 모르는 주문을 봉인하고 예산으로 새 장부를 만들며"
+            " 다른 계좌·보유가 있으면 하지 않음",
+            case_live_resume,
+        ),
+        (
+            "연습 운용: 주문 생성·취소 없이 연습 장부에 그 봉 종가로 체결, 실장부로 넘어가지 않음, 그날 중 설정을 바꿔도 그날 방식 그대로, 실장부는 두 종목 0주·대기 없음·"
+            "매수 가능 금액 ≥ 예산일 때만, 실장부에 보유가 있으면 연습 운용으로 돌아가지 않음, 다른 쪽이 주문 잠금을 쥐면 주문·풀기 없음",
+            case_live_practice,
+        ),
+        (
+            "실주문 점검: 개장 전 OPG 1주 매수 → 취소 확인, 장중 1주 사고팔기(v5c- 번호, 장부에 넣지 않음), 매도 직전 정지면 팔지 않음, 실주문 중·보유가 있으면·"
+            "주문 잠금을 못 쥐면 주문하지 않음",
+            case_live_check,
+        ),
+        (
+            "목표를 정하지 않는 네 이유(정산 밀림, 상·하한가 없음, 기준가 다름, 차례 봉이 +40초까지 없음)에서 주문 생성 요청이 없고 차례 기록에 이유가 남음,"
+            " 차례 기록에 두 종목 가격·봇 현금·보유·자산·실계좌 수량과 대조·한도가 남음",
+            case_live_reasons,
+        ),
+    ],
 }
 
 
@@ -429,7 +1086,8 @@ def run(prd: str | None = None) -> int:
             continue
         for name, case in cases:
             try:
-                case()
+                with contextlib.redirect_stdout(io.StringIO()):  # 실행기가 차례마다 쓰는 줄은 결과 JSON에 섞지 않는다
+                    case()
                 results.append({"prd": prd_id, "case": name, "passed": True})
             except Exception as error:
                 results.append({"prd": prd_id, "case": name, "passed": False, "error": f"{type(error).__name__}: {error}"})

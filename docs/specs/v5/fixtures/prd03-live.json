@@ -1,0 +1,163 @@
+{
+  "day": "2025-11-12",
+  "next_day": "2025-11-13",
+  "config": {"account_seq": 3, "budget": 500000, "max_shares": null, "orders": true},
+  "limits": {"069500": [13000, 7000], "114800": [1950, 1050]},
+  "commission": "0.00015",
+  "prices": {"069500": 10000, "114800": 1500},
+  "schedule": {
+    "2025-11-12": {"count": 383, "start": "08:45:00", "pre_open": "08:55:00", "first": ["09:01", "09:01:10"], "last": ["15:19", "15:19:10"], "closing": ["15:20", "15:20:10"], "end": "15:40:00"},
+    "2026-01-02": {"count": 323, "start": "09:45:00", "pre_open": "09:55:00", "first": ["10:01", "10:01:10"], "last": ["15:19", "15:19:10"], "closing": ["15:20", "15:20:10"], "end": "15:40:00"},
+    "2025-11-13": {"count": 383, "start": "09:45:00", "pre_open": "09:55:00", "first": ["10:01", "10:01:10"], "last": ["16:19", "16:19:10"], "closing": ["16:20", "16:20:10"], "end": "16:40:00"}
+  },
+  "scenarios": {
+    "sell_then_buy_open": {
+      "ledger": {"069500": 49, "cash": 10000},
+      "broker": {"holdings": {"069500": 49, "114800": 0}, "power": 600000},
+      "steps": [
+        {"turn": "pre_open", "target": "114800", "posts": [["v5-20251112-0855-069500-S", "069500", "SELL", "OPG", "49"]]},
+        {"fill": ["v5-20251112-0855-069500-S", "FILLED", 49, 490000, 70, 0]},
+        {"turn": "09:01", "target": "114800", "posts": [["v5-20251112-0901-114800-B", "114800", "BUY", "DAY", "256"]]}
+      ],
+      "balance": {"cash": 499930, "holdings": {}}
+    },
+    "sell_close_buy_next_open": {
+      "ledger": {"069500": 49, "cash": 10000},
+      "broker": {"holdings": {"069500": 49, "114800": 0}, "power": 600000},
+      "steps": [
+        {"turn": "closing", "target": "114800", "posts": [["v5-20251112-1520-069500-S", "069500", "SELL", "DAY", "49"]]},
+        {"fill": ["v5-20251112-1520-069500-S", "FILLED", 49, 490000, 70, 0]},
+        {"turn": "end", "posts": []},
+        {"next_day": true, "turn": "pre_open", "target": "114800", "posts": [["v5-20251113-0955-114800-B", "114800", "BUY", "OPG", "256"]]}
+      ],
+      "balance": {"cash": 499930, "holdings": {}}
+    },
+    "quantity": {
+      "ledger": {"cash": 500000},
+      "broker": {"power": 300000},
+      "steps": [
+        {"turn": "09:01", "target": "069500", "posts": [["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "23"]]},
+        {"fill": ["v5-20251112-0901-069500-B", "FILLED", 23, 230115, 35, 0]},
+        {"turn": "09:02", "target": "069500", "posts": []}
+      ],
+      "balance": {"cash": 269850, "holdings": {"069500": 23}},
+      "max_shares": {"config": 1, "turn": "09:01", "target": "069500", "posts": [["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "1"]]},
+      "unlimited": {"power": 900000, "turn": "09:01", "target": "069500", "posts": [["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "38"]]}
+    },
+    "lost": {
+      "ledger": {"cash": 500000},
+      "broker": {"post": ["lost"]},
+      "order": ["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "38"]
+    },
+    "never": {
+      "ledger": {"cash": 500000},
+      "broker": {"post": ["network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network", "network"]},
+      "order": ["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "38"],
+      "posts_in_8_minutes": 48
+    },
+    "rate_limited": {
+      "ledger": {"cash": 500000},
+      "broker": {"post": [[429, {"error": {"code": "rate-limited", "message": "x"}}, {"Retry-After": "600"}]]},
+      "posts_in_8_minutes": 1
+    },
+    "duplicate_turn": {
+      "ledger": {"cash": 500000},
+      "first": ["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "38"],
+      "fill": ["v5-20251112-0901-069500-B", "FILLED", 38, 380190, 57, 0]
+    },
+    "foreign": {
+      "ledger": {"cash": 500000},
+      "broker": {"foreign": [{"orderId": "ext-1", "symbol": "069500", "side": "BUY", "quantity": "3", "status": "PENDING"}]}
+    },
+    "late_start": {
+      "ledger": {"cash": 500000},
+      "day_row": false,
+      "start_at": "2025-11-12T15:19:30",
+      "turns": ["start", "15:19", "15:20", "end"]
+    },
+    "partial": {
+      "ledger": {"cash": 500000},
+      "first": ["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "38"],
+      "fill": ["v5-20251112-0901-069500-B", "PARTIAL_FILLED", 10, 100050, null, null],
+      "after_partial": {"cash": 399950, "holdings": {"069500": 10}},
+      "late_fee": 15,
+      "after_fee": {"cash": 399935, "holdings": {"069500": 10}}
+    },
+    "auction": {
+      "ledger": {"cash": 500000},
+      "pre_open": ["v5-20251112-0855-069500-B", "069500", "BUY", "OPG", "38"],
+      "closing": ["v5-20251112-1520-069500-B", "069500", "BUY", "DAY", "38"]
+    },
+    "limits": {
+      "ledger": {"069500": 50, "cash": 0},
+      "broker": {"holdings": {"069500": 50, "114800": 0}},
+      "source": {"fetched_at": "2025-11-12T07:00:00+09:00", "volume": 1000, "days": [{"date": "2025-11-11", "prices": {"069500": 10000, "114800": 1500}}]},
+      "daily": {"price": 9800, "posts": [["v5-20251112-0901-069500-S", "069500", "SELL", "DAY", "50"]], "latches": [["daily", "2025-11-12"]]},
+      "above_daily": {"price": 9805, "posts": []},
+      "base_changed": {"limits": {"069500": [13005, 7000], "114800": [1950, 1050]}, "price": 9800, "posts": []},
+      "weekly": {"limits": {"069500": [13005, 7000], "114800": [1950, 1050]}, "price": 9500, "posts": [["v5-20251112-0901-069500-S", "069500", "SELL", "DAY", "50"]], "latches": [["weekly", "2025-W46"]]},
+      "cumulative": {"price": 8000, "posts": [["v5-20251112-0901-069500-S", "069500", "SELL", "DAY", "50"]], "stop": ["limit", "sell"]},
+      "fill": ["v5-20251112-0901-069500-S", "FILLED", 50, 490000, 74, 0]
+    },
+    "replaced": {
+      "ledger": {"cash": 500000},
+      "status": "REPLACED"
+    },
+    "resume": {
+      "ledger": {"069500": 10, "cash": 400000},
+      "broker": {"holdings": {"069500": 10, "114800": 0}}
+    },
+    "new_ledger": {
+      "ledger": {"cash": 500000},
+      "broker": {"holdings": {"069500": 0, "114800": 0}},
+      "config": {"budget": 300000}
+    },
+    "practice": {
+      "ledger": null,
+      "day_row": false,
+      "config": {"orders": false},
+      "posts": [],
+      "dry_order": ["v5-20251112-0901-069500-B", "dry", "069500", "BUY", "DAY", 38, "final"],
+      "dry_balance": {"cash": 119929, "holdings": {"069500": 38}}
+    },
+    "create": {
+      "ledger": null,
+      "day_row": false,
+      "broker": {"holdings": {"069500": 0, "114800": 0}, "power": 510000}
+    },
+    "guard": {
+      "ledger": {"069500": 10, "cash": 400000},
+      "day_row": false,
+      "broker": {"holdings": {"069500": 10, "114800": 0}},
+      "config": {"orders": false}
+    },
+    "check": {
+      "ledger": null,
+      "day_row": false,
+      "config": {"orders": false},
+      "pre_open_at": "2025-11-12T08:40:00",
+      "pre_open_posts": [["v5c-20251112-084000-B", "069500", "BUY", "OPG", "1"]],
+      "intraday_at": "2025-11-12T10:00:00",
+      "intraday_posts": [["v5c-20251112-100000-B", "069500", "BUY", "DAY", "1"], ["v5c-20251112-100000-S", "069500", "SELL", "DAY", "1"]]
+    },
+    "rejected": {
+      "ledger": {"cash": 500000},
+      "broker": {"post": [[422, {"error": {"code": "insufficient-buying-power", "message": "x"}}], [422, {"error": {"code": "insufficient-buying-power", "message": "x"}}], [422, {"error": {"code": "insufficient-buying-power", "message": "x"}}]]},
+      "turns": ["09:01", "09:02", "09:03", "09:04"],
+      "posts": [1, 1, 1, 0]
+    },
+    "sell_stop": {
+      "ledger": {"069500": 10, "cash": 400000},
+      "broker": {"holdings": {"069500": 10, "114800": 0}},
+      "posts": [["v5-20251112-0901-069500-S", "069500", "SELL", "DAY", "10"]]
+    },
+    "reasons": {
+      "ledger": {"cash": 500000},
+      "source": {"fetched_at": "2025-11-12T07:00:00+09:00", "volume": 1000, "days": [{"date": "2025-11-11", "prices": {"069500": 10000, "114800": 1500}}]},
+      "decision": ["2025-11-12", "08:50", "pre_open", "ok", "hold_kodex200"],
+      "computed": [["v5-20251112-0901-069500-B", "069500", "BUY", "DAY", "38"]],
+      "one_tick_off": {"069500": [13005, 7000], "114800": [1950, 1050]},
+      "early_start": "2025-11-10"
+    }
+  }
+}
