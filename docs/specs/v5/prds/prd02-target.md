@@ -32,7 +32,7 @@ v4 모의 계좌는 다음 날 아침 정산 때만 계산한다. 실행기는 �
 | `src/rt_trading/engine.py` | 선택 인자 `state`(마지막 봉 뒤의 상태 알리기), 봉 없는 첫날 |
 | `src/rt_trading/v4_paper.py` | `simulate`가 `state`를 엔진에 넘기는 선택 인자 |
 | `src/rt_trading/v5_target.py` | v5 기간·달력, 오늘을 더한 시세, 다시 돌리기, 목표, 상·하한가 계산 |
-| `src/rt_trading/v5_period.json` | 시작일 `2026-11-09` |
+| `src/rt_trading/v5_period.json` | 시작일 `2026-11-10` |
 | `src/rt_trading/v5_acceptance.py` | PRD 02 사례 |
 | `docs/specs/v5/fixtures/prd02-target.json` | 가상 시세 spec, 판단 기록, 손으로 계산한 상태·목표·상하한가 |
 

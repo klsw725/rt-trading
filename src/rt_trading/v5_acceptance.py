@@ -1557,16 +1557,19 @@ def _until(check: Callable[[], bool]) -> None:
 
 def case_serve_live() -> None:
     fixture = _fixture("prd05-serve.json")
-    holidays, together = {day for day, _ in fixture["holidays"]}, fixture["together"]
+    together = fixture["together"]
     with tempfile.TemporaryDirectory() as name:
         tmp = Path(name)
-        paths = _serve_paths(tmp, together["start"], fixture["holidays"])
+        paths = _serve_paths(tmp, fixture["live_start"], fixture["holidays"])
+        period = v5_serve.period(paths, _time(f"{fixture['live_start']}T00:00:00"))
         for day, (start, end) in fixture["live_hours"].items():
             first = _time(f"{day}T{start}")
-            assert not v5_serve.live_wanted(first - timedelta(seconds=1), holidays, paths.live) and v5_serve.live_wanted(first, holidays, paths.live), day
+            assert not v5_serve.live_wanted(first - timedelta(seconds=1), period, paths.live) and v5_serve.live_wanted(first, period, paths.live), day
             assert v5_live.turns(day)[-1].at == _time(f"{day}T{end}"), day
         for at in fixture["live_off"]:
-            assert not v5_serve.live_wanted(_time(at), holidays, paths.live), at
+            assert not v5_serve.live_wanted(_time(at), period, paths.live), at
+        paths = _serve_paths(tmp, together["start"], fixture["holidays"])
+        period = v5_serve.period(paths, _time(f"{together['start']}T00:00:00"))
         clock, state, launched = _LiveClock(_time(fixture["watch"]["steps"][0][0])), {"process": None, "exited": None}, []
 
         def launch(specs: list[list]) -> _FakeExecutor:
@@ -1575,7 +1578,7 @@ def case_serve_live() -> None:
 
         for at, count in fixture["watch"]["steps"]:
             clock.now = _time(at)
-            v5_serve.watch(state, clock.now, holidays, paths.live, lambda: launch(fixture["watch"]["launches"]))
+            v5_serve.watch(state, clock.now, period, paths.live, lambda: launch(fixture["watch"]["launches"]))
             assert len(launched) == count, (at, len(launched))
         launched.clear()
         runs, stop = [], threading.Event()
@@ -1594,7 +1597,7 @@ def case_serve_live() -> None:
             return 0
 
         clock.now = _time(together["morning"])
-        thread = threading.Thread(target=v5_serve.supervise, args=(holidays, paths.live, clock, lambda: launch(together["launches"]), stop))
+        thread = threading.Thread(target=v5_serve.supervise, args=(period, paths.live, clock, lambda: launch(together["launches"]), stop))
         thread.start()
         try:
             for at in (together["morning"], together["decide"]):
@@ -1803,7 +1806,7 @@ CASES = {
         ),
         (
             "실행기 돌보기: 정상일 08:45·10시 개장일과 수능일 09:45부터 켜고 끝 차례는 15:40·16:40, end 전에 끝나면 30초 뒤 다시 켬(c + 10분 뒤 포함),"
-            " end 기록 뒤·자정 뒤·휴장일·주말에는 켜지 않음, 아침·판단 명령이 도는 동안에도 켜고 다시 켬",
+            " end 기록 뒤·자정 뒤·휴장일·주말·v5 시작일 전에는 켜지 않음, 아침·판단 명령이 도는 동안에도 켜고 다시 켬",
             case_serve_live,
         ),
         (

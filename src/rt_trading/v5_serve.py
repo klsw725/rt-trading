@@ -33,31 +33,31 @@ def period(paths: v5_live.Paths, now: datetime) -> v3_daily.Period:
     return v5_target.load_period(paths.period, paths.holidays, now.date().isoformat())
 
 
-def live_wanted(now: datetime, holidays: set[str], live_db: Path) -> bool:
-    """now에 실행기가 돌고 있어야 하는가. 거래일의 개장 15분 전부터 그날 end 차례를 마쳤다는 기록(days.ended)이 생길 때까지다. 날은 자정에 바뀐다."""
+def live_wanted(now: datetime, period: v3_daily.Period, live_db: Path) -> bool:
+    """now에 실행기가 돌고 있어야 하는가. v5 기간(시작일부터)의 거래일 개장 15분 전부터 그날 end 차례를 마쳤다는 기록(days.ended)이 생길 때까지다. 날은 자정에 바뀐다."""
     day = now.date().isoformat()
-    if not v3_daily.is_trading_day(day, holidays) or now < v4_serve._at(day, sessions.session(day, sessions.exceptions()).open) - EARLY:
+    if day < period.start or not v3_daily.is_trading_day(day, period.holidays) or now < v4_serve._at(day, sessions.session(day, sessions.exceptions()).open) - EARLY:
         return False
     return not v5_book.read(live_db, "SELECT 1 FROM days WHERE date = ? AND ended = 1", (day,))
 
 
-def watch(state: dict, now: datetime, holidays: set[str], live_db: Path, launch: Callable[[], subprocess.Popen]) -> None:
+def watch(state: dict, now: datetime, period: v3_daily.Period, live_db: Path, launch: Callable[[], subprocess.Popen]) -> None:
     """실행기 돌보기 한 번. state는 {"process": 켠 실행기, "exited": 그 실행기가 끝난 것을 본 시각}이다.
 
     끝난 실행기를 거두고, 돌고 있는 실행기가 없고 끝난 것을 본 지 30초가 지났으며 돌아야 할 때(live_wanted)면 launch로 켠다.
     """
     if state["process"] is not None and state["process"].poll() is not None:
         state["process"], state["exited"] = None, now
-    if state["process"] is None and (state["exited"] is None or now - state["exited"] >= RESTART) and live_wanted(now, holidays, live_db):
+    if state["process"] is None and (state["exited"] is None or now - state["exited"] >= RESTART) and live_wanted(now, period, live_db):
         state["process"] = launch()
 
 
-def supervise(holidays: set[str], live_db: Path, clock: Callable[[], datetime], launch: Callable[[], subprocess.Popen], stop: threading.Event) -> None:
-    """실행기 돌보기 스레드. 판단 명령과 따로 1초마다 watch를 하고, stop이 서면 끝난다."""
+def supervise(period: v3_daily.Period, live_db: Path, clock: Callable[[], datetime], launch: Callable[[], subprocess.Popen], stop: threading.Event) -> None:
+    """실행기 돌보기 스레드. 판단 명령과 따로 1초마다 watch를 하고, stop이 서면 끝난다. period는 시작일과 휴장일만 쓴다."""
     state = {"process": None, "exited": None}
     while True:
         try:
-            watch(state, clock(), holidays, live_db, launch)
+            watch(state, clock(), period, live_db, launch)
         except Exception as error:  # 이 스레드가 죽으면 실행기를 다시 켜는 쪽이 없어진다
             print(f"V5_SUPERVISE_ERROR: {type(error).__name__}: {error}", flush=True)
         if stop.wait(1):
@@ -74,14 +74,14 @@ def run(paths: v5_live.Paths, report_dir: Path, log_path: Path, live_log: Path, 
     """웹페이지와 실행기 돌보기 스레드를 켜고, 10초마다 한 번씩 확인해 차례의 명령을 실행한다. 기간 설정이 틀리면 1이고, 아니면 멈출 때까지 돈다."""
     clock = lambda: datetime.now(KST)
     try:
-        holidays = period(paths, clock()).holidays
+        first = period(paths, clock())
     except v3_daily.DailyError as error:
         print(error)
         return 1
     status = {"started_at": v4_serve._stamp(clock()), "running": None, "last": None}
     httpd = v3_serve.server(host, port, lambda: page(paths, period(paths, clock()), report_dir, log_path, status, clock()))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    threading.Thread(target=supervise, args=(holidays, paths.live, clock, lambda: _launch(live_log, clock()), threading.Event()), daemon=True).start()
+    threading.Thread(target=supervise, args=(first, paths.live, clock, lambda: _launch(live_log, clock()), threading.Event()), daemon=True).start()
     done = None
     while True:
         done = v4_serve.tick(done, status, log_path, period(paths, clock()), clock, v4_serve._execute, "v5")
