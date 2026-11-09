@@ -48,10 +48,14 @@ def candidates_at(
     saved_infos: dict[str, dict],
     holdings: dict[str, int],
     open_at: dict,
+    total: int,
+    used: dict,
 ) -> list[dict]:
     """C까지 받은 이번 랭킹·종목 정보로 만든 후보(SPEC 2.2).
 
     이번 종목 정보를 C까지 받지 못했으면 랭킹은 쓰지 않고 보유 종목만 마지막 저장값으로 넣는다. 저장값도 C 이하에 받은 것만 쓴다.
+    total과 used는 valuation의 C 평가다. 1주 값(보유 종목은 C 평가에 쓴 값, 아니면 랭킹 현재가. 미국은 C 평가의 환율로 바꾼다)이
+    total의 40%보다 크거나 알 수 없는 랭킹 종목은 고르지 않고(보유 종목은 남는다), 후보마다 1주 비중 one_share_pct를 붙인다.
     """
     current = infos[0] if infos is not None and infos[1] <= cutoff else None
     usable = {} if current is None else {market: items for market, (items, observed) in rankings.items() if observed <= cutoff}
@@ -60,7 +64,20 @@ def candidates_at(
         saved = saved_infos.get(symbol)
         if quantity > 0 and symbol not in chosen and saved and datetime.fromisoformat(saved["observed_at"]) <= cutoff:
             chosen[symbol] = saved
-    return v6_market.candidates(usable, chosen, holdings, open_at)
+    rate = used["USDKRW"][0] if "USDKRW" in used else None
+    listed = {item["symbol"]: (market, item["last_price"]) for market, items in usable.items() for item in items}
+
+    def won(market: str, price: object) -> Decimal | None:
+        if price is None or (market == "US" and rate is None):
+            return None
+        return Decimal(price) * (1 if market == "KR" else rate)
+
+    skip = frozenset(symbol for symbol, (market, price) in listed.items() if (cost := won(market, price)) is None or cost > total * MAX_WEIGHT)
+    result = v6_market.candidates(usable, chosen, holdings, open_at, skip)
+    for item in result:
+        cost = won(item["market"], used[item["symbol"]][0] if item["symbol"] in used else listed.get(item["symbol"], (None, None))[1])
+        item["one_share_pct"] = v3_head.pct(cost / total) if cost is not None and total > 0 else None
+    return result
 
 
 def equity(krw: int, usd: Decimal, positions: dict[str, dict], prices: dict[str, Decimal], rate: Decimal | None) -> int:
@@ -77,10 +94,8 @@ def equity(krw: int, usd: Decimal, positions: dict[str, dict], prices: dict[str,
     return int(total.quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
-def account(
-    state: dict, observed: dict, cutoff: datetime, bases: dict, history: list[int], blocked: list[str], candidates: list[dict]
-) -> tuple[int, dict, dict]:
-    """C 평가: (A_C, 쓴 값, 계좌 요약).
+def valuation(state: dict, observed: dict, cutoff: datetime) -> tuple[int, dict]:
+    """C 평가 자산과 쓴 값: (A_C, 쓴 값).
 
     state는 {"krw", "usd", "positions": {종목: {"market", "quantity", "avg_price", …}}, "last": {종목·USDKRW: (값, 받은 시각)}},
     observed는 이번 차례에 받은 {"prices": {종목: (값, 받은 시각)}, "rate": (값, 받은 시각) 또는 None}이다.
@@ -94,8 +109,16 @@ def account(
         missing = [key for key, value in used.items() if value is None]
         raise HeadError("V6_VALUE_MISSING", f"받은 적이 없는 값이 있다({', '.join(missing)})")
     prices = {symbol: used[symbol][0] for symbol in state["positions"]}
-    midrate = rate[0] if rate else None
-    total = equity(state["krw"], state["usd"], state["positions"], prices, midrate)
+    return equity(state["krw"], state["usd"], state["positions"], prices, rate[0] if rate else None), used
+
+
+def account(
+    state: dict, observed: dict, cutoff: datetime, bases: dict, history: list[int], blocked: list[str], candidates: list[dict]
+) -> tuple[int, dict, dict]:
+    """C 평가: (A_C, 쓴 값, 계좌 요약). A_C와 쓴 값은 valuation과 같다."""
+    total, used = valuation(state, observed, cutoff)
+    prices = {symbol: used[symbol][0] for symbol in state["positions"]}
+    midrate = used["USDKRW"][0] if "USDKRW" in used else None
     flags = {item["symbol"]: item for item in candidates}
     holdings = []
     for symbol in sorted(state["positions"]):

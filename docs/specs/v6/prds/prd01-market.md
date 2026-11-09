@@ -11,7 +11,7 @@
 | --- | --- |
 | `GET /api/v1/market-calendar/KR?date=` | `result`의 `previousBusinessDay`, `today`, `nextBusinessDay`마다 `date`(한국 날짜)와 `integrated`의 `preMarket`·`regularMarket`·`afterMarket`의 `startTime`·`endTime`(한국 시각). 휴장일은 `integrated`가 `null`이다 |
 | `GET /api/v1/market-calendar/US?date=` | 같은 세 날마다 `date`(미국 현지 날짜)와 `dayMarket`·`preMarket`·`regularMarket`·`afterMarket`의 `startTime`·`endTime`(한국 시각). 휴장일은 넷 다 `null`이다 |
-| `GET /api/v1/rankings` | `type=MARKET_TRADING_AMOUNT`, `marketCountry`(`KR`·`US`), `duration=1d`, `excludeInvestmentCaution=true`, `count=50`. `result.rankings`의 `rank`, `symbol`, `price.changeRate`(소수 비율 문자열, 없으면 `null`) |
+| `GET /api/v1/rankings` | `type=MARKET_TRADING_AMOUNT`, `marketCountry`(`KR`·`US`), `duration=1d`, `excludeInvestmentCaution=true`, `count=50`. `result.rankings`의 `rank`, `symbol`, `price.changeRate`(소수 비율 문자열, 없으면 `null`), `price.lastPrice`(현재가 문자열) |
 | `GET /api/v1/stocks?symbols=` | 쉼표로 이은 최대 200개. 종목마다 `symbol`, `name`, `market`, `securityType`, `status`, `currency`, `leverageFactor`(문자열, 없으면 `null`), `koreanMarketDetail`(`liquidationTrading`, `nxtSupported`, `krxTradingSuspended`, `nxtTradingSuspended`. 미국 종목은 `null`) |
 
 ## 문제
@@ -84,8 +84,9 @@ v6는 국내·미국 세션이 날마다 다르고(휴장일, 단축 거래, 서
 - `instruments`의 열은 `symbol`, `name`, `market`, `security_type`, `status`, `currency`, `leverage`(문자열, 없으면 빈 문자열), `nxt_supported`, `nxt_suspended`, `krx_suspended`, `liquidation`(0·1, 미국 종목은 0), `observed_at`이다. `market`은 토스 `market`이 `KOSPI`·`KOSDAQ`·`KR_ETC`이면 `KR`, `NYSE`·`NASDAQ`·`AMEX`·`US_ETC`이면 `US`이고, 그 밖이면 그 종목은 돌려주지 않는다.
 - `eligible(info)`: `security_type`이 `STOCK` 또는 `ETF`이고 `status`가 `ACTIVE`다. ETF는 `leverage`를 수로 읽어 1 또는 −1이다(비어 있으면 거짓). 국내 종목은 `krx_suspended`와 `liquidation`이 거짓이다.
 - `tradable(info, open_at_E)`: 그 시장 세션이 E에 열려 있다. 국내 `regular`면 `krx_suspended`가 거짓이고, 국내 `pre`·`after`면 `nxt_supported`가 참이고 `nxt_suspended`가 거짓이다(`null`은 거짓으로 본다).
-- `candidates(rankings, infos, holdings, open_at_E)`는 아래 순서로 후보 목록을 만든다. `rankings`는 받은 시장의 랭킹, `infos`는 종목마다 쓸 종목 정보다(어느 값을 쓸지는 PRD 02 `candidates_at`이 정한다).
-  1. 시장 KR, US 순으로, 받은 랭킹을 순위 순으로 보며 `infos`에 있고 `eligible`이고 `tradable`인 종목을 10개까지 고른다.
+- `fetch_rankings`의 항목은 `rank`, `symbol`, `change_rate`(`changeRate`), `last_price`(`lastPrice`)다. 두 값은 수로 읽히는 문자열이거나 없으면 `null`이고, 그 밖이면 `V6_TOSS_RESPONSE_INVALID`다.
+- `candidates(rankings, infos, holdings, open_at_E, skip)`는 아래 순서로 후보 목록을 만든다. `rankings`는 받은 시장의 랭킹, `infos`는 종목마다 쓸 종목 정보, `skip`은 랭킹에서 고르지 않을 종목(기본은 없음)이다(어느 값을 쓸지는 PRD 02 `candidates_at`이 정한다).
+  1. 시장 KR, US 순으로, 받은 랭킹을 순위 순으로 보며 `skip`에 없고 `infos`에 있고 `eligible`이고 `tradable`인 종목을 10개까지 고른다.
   2. 보유 종목(수량 > 0) 가운데 1에 없는 종목을 종목 코드 순으로 더한다.
   3. 항목은 `symbol`, `name`, `market`, `type`(`security_type`), `leverage`(수, 비어 있으면 `null`), `tradable_now`, `exit_only`(보유 종목이고 `eligible`이 아니면 참), `change_pct`(랭킹 `changeRate` × 100을 소수 둘째 자리 `ROUND_HALF_UP`, 랭킹에 없거나 `null`이면 `null`), `rank`(랭킹에 없으면 `null`), `held`의 순서다.
 - 랭킹은 E에 세션이 열린 시장만 받는다.

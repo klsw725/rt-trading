@@ -17,7 +17,7 @@
       ["100002", "가상주식2", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, false, false, null]],
       ["UST1", "가상미국1", "NASDAQ", "STOCK", "ACTIVE", "USD", null, null]
     ],
-    "rankings": {"KR": [[1, "100001", "0.01"]], "US": [[1, "UST1", "0.02"]]},
+    "rankings": {"KR": [[1, "100001", "0.01", "10000"]], "US": [[1, "UST1", "0.02", "20.00"]]},
     "rate": {"rate": "1350.50", "midRate": "1350.00", "validFrom": "2026-11-17T10:39:00+09:00", "validUntil": "2026-11-17T10:44:00+09:00"},
     "reply": "{\"positions\": [{\"symbol\": \"100001\", \"weight\": 0.2}], \"strategy\": \"추세\", \"reason\": \"이유\", \"notes\": \"노트\"}",
     "book": {"timestamp": "2026-11-17T10:45:00+09:00", "currency": "KRW", "asks": [{"price": "10000", "volume": "6"}], "bids": [{"price": "9990", "volume": "100"}]},

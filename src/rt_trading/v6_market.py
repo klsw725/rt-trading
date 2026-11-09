@@ -194,13 +194,11 @@ def end_time(calendar: dict, start: str, fill: Callable[[str], None]) -> datetim
 def fetch_rankings(
     http: httpx.Client, token: toss.SharedToken, market: str, deadline: datetime, clock: Callable[[], datetime], events: list[dict]
 ) -> tuple[list[dict], datetime]:
-    """거래대금 랭킹 50위까지 [{"rank", "symbol", "change_rate"}](순위 순)와 받은 시각."""
+    """거래대금 랭킹 50위까지 [{"rank", "symbol", "change_rate", "last_price"}](순위 순)와 받은 시각."""
     params = {"type": "MARKET_TRADING_AMOUNT", "marketCountry": market, "duration": "1d", "excludeInvestmentCaution": "true", "count": RANK_COUNT}
     result, observed = request(http, token, "/api/v1/rankings", params, deadline, clock, events)
     try:
-        items = [
-            {"rank": int(item["rank"]), "symbol": item["symbol"], "change_rate": _rate(_object(item.get("price")).get("changeRate"))} for item in result["rankings"]
-        ]
+        items = [_ranking(item) for item in result["rankings"]]
     except (KeyError, TypeError, ValueError, AttributeError, InvalidOperation) as error:
         raise V6Error("V6_TOSS_RESPONSE_INVALID", f"{market} 랭킹 형식 오류({error!r})") from error
     return sorted(items, key=lambda item: item["rank"]), observed
@@ -262,15 +260,20 @@ def tradable(info: dict, open_at: dict) -> bool:
     return bool(info["nxt_supported"]) and not info["nxt_suspended"]
 
 
-def candidates(rankings: dict[str, list[dict]], infos: dict[str, dict], holdings: dict[str, int], open_at: dict) -> list[dict]:
-    """후보 목록. 시장 KR·US 순으로 랭킹에서 조건에 맞고 거래할 수 있는 종목을 10개까지 고른 뒤, 그 밖의 보유 종목을 종목 코드 순으로 더한다."""
+def candidates(
+    rankings: dict[str, list[dict]], infos: dict[str, dict], holdings: dict[str, int], open_at: dict, skip: frozenset[str] = frozenset()
+) -> list[dict]:
+    """후보 목록. 시장 KR·US 순으로 랭킹에서 조건에 맞고 거래할 수 있는 종목을 10개까지 고른 뒤, 그 밖의 보유 종목을 종목 코드 순으로 더한다.
+
+    skip의 종목은 랭킹에서 고르지 않는다. 보유 종목이면 뒤에 보유 종목으로 들어간다.
+    """
     ranked = {item["symbol"]: item for market in ("KR", "US") for item in rankings.get(market, [])}
     chosen = []
     for market in ("KR", "US"):
         picked = [
             item["symbol"]
             for item in rankings.get(market, [])
-            if (info := infos.get(item["symbol"])) and info["market"] == market and eligible(info) and tradable(info, open_at)
+            if item["symbol"] not in skip and (info := infos.get(item["symbol"])) and info["market"] == market and eligible(info) and tradable(info, open_at)
         ][:PICKS]
         chosen += [symbol for symbol in picked if symbol not in chosen]
     held = sorted(symbol for symbol, quantity in holdings.items() if quantity > 0 and symbol not in chosen and symbol in infos)
@@ -302,12 +305,17 @@ def _object(value: object) -> dict:
     return value
 
 
-def _rate(value: object) -> str | None:
-    """랭킹 changeRate. 없으면 None이고, 글자가 아니면 TypeError, 수로 읽을 수 없으면 InvalidOperation이다."""
+def _ranking(item: dict) -> dict:
+    price = _object(item.get("price"))
+    return {"rank": int(item["rank"]), "symbol": item["symbol"], "change_rate": _number_text(price.get("changeRate")), "last_price": _number_text(price.get("lastPrice"))}
+
+
+def _number_text(value: object) -> str | None:
+    """랭킹의 changeRate·lastPrice. 없으면 None이고, 글자가 아니면 TypeError, 수로 읽을 수 없으면 InvalidOperation이다."""
     if value is None:
         return None
     if not isinstance(value, str):
-        raise TypeError(f"changeRate가 글자가 아니다({type(value).__name__})")
+        raise TypeError(f"수가 글자가 아니다({type(value).__name__})")
     Decimal(value)
     return value
 

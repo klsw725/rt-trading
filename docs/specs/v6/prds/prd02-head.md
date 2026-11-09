@@ -45,17 +45,20 @@
 
 ## 후보
 
-- `candidates_at(cutoff, rankings, infos, saved_infos, holdings, open_at_E)`는 C까지 받은 이번 랭킹과 종목 정보로 PRD 01 `candidates`를 부른다.
+- `candidates_at(cutoff, rankings, infos, saved_infos, holdings, open_at_E, total, used)`는 C까지 받은 이번 랭킹과 종목 정보로 PRD 01 `candidates`를 부른다. `total`과 `used`는 아래 `valuation`의 A_C와 쓴 값이다.
   - 이번 종목 정보를 C까지 받았으면 랭킹 종목은 이번 값을 쓰고, 이번 값에 없는 보유 종목은 `observed_at`이 C 이하인 마지막 저장값(`saved_infos`)을 쓴다.
   - 이번 종목 정보를 C까지 받지 못했으면 랭킹은 쓰지 않고, 보유 종목만 마지막 저장값으로 넣는다(SPEC 2.2).
   - 한 시장의 랭킹을 C까지 받지 못했으면 그 시장의 새 후보는 없다.
+  - 1주 값은 보유 종목이면 `used`의 값, 아니면 랭킹 `last_price`이고, 미국은 `used`의 `USDKRW`를 곱한다(없으면 모름). 1주 값이 `total` × 0.4보다 크거나 모르는 랭킹 종목은 `skip`으로 넘겨 고르지 않는다. 보유 종목은 PRD 01대로 뒤에 들어간다.
+  - 후보마다 끝에 `one_share_pct`(1주 값 ÷ `total`을 `v3_head.pct`로, 모르면 `null`)를 붙인다.
 - `account`와 `build_input`은 이 같은 후보 목록을 받고, 후보를 다시 만들지 않는다.
 
 ## 평가 자산과 계좌 요약
 
 - `equity(krw, usd, positions, prices, rate)`는 원화 평가 자산 A(정수 원)다. A = 원화 현금 + Σ 국내 수량 × 가격 + (달러 현금 + Σ 미국 수량 × 가격) × `rate`를 원 미만 `ROUND_HALF_UP`. 원화는 정수, 달러와 환율은 `Decimal`이다. PRD 03의 평가도 이 함수를 쓴다.
 - 현재가와 환율은 C까지 받은 이번 값, 없으면 마지막으로 받은 값(계좌 상태의 마지막 값)이다.
-- `account(state, observed, cutoff, bases, history, blocked, candidates)`는 (A_C, 쓴 값, 계좌 요약)을 돌려준다. 요약은 아래 키를 이 순서로 가진다. 비율은 `v3_head.pct`로 쓴다.
+- `valuation(state, observed, cutoff)`는 (A_C, 쓴 값)을 돌려준다. 받은 적이 없는 값이 있으면 `V6_VALUE_MISSING`이다.
+- `account(state, observed, cutoff, bases, history, blocked, candidates)`는 `valuation`과 같은 (A_C, 쓴 값)과 계좌 요약을 돌려준다. 요약은 아래 키를 이 순서로 가진다. 비율은 `v3_head.pct`로 쓴다.
 
 | 키 | 값 |
 | --- | --- |
@@ -122,7 +125,7 @@
 
 SPEC 9절의 "헤드" 항목을 맡는다.
 
-- C 뒤에 받은 랭킹·종목 정보·현재가·환율과 C 뒤에 나온 기사를 바꿔도 입력이 같다. 입력에 가격 자체, 계좌 번호, 인증 정보가 없다. Codex를 두 번 부르면 두 호출의 입력이 같다.
+- C 뒤에 받은 랭킹·종목 정보·현재가·환율과 C 뒤에 나온 기사를 바꿔도 입력이 같다. 입력에 가격 자체, 계좌 번호, 인증 정보가 없다. Codex를 두 번 부르면 두 호출의 입력이 같다. 1주 값이 C 평가 자산의 40%보다 큰 랭킹 종목은 후보에 없고, 그런 보유 종목은 후보에 남는다.
 - 목록 밖 종목, `exit_only` 종목, 6종목, 비중 0.41, 비중 합 1.01, 겹친 종목은 형식 오류다. E 뒤 응답은 `late`다. 첫 호출이 실패하면 한 번만 더 부른다. 실패한 차례에는 사고팔지 않는다(`targets`가 `None`).
 
 ## 완료 조건

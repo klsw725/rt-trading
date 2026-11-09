@@ -246,15 +246,22 @@ def case_head_input() -> None:
     def content(after: dict, infos: tuple[dict, datetime]) -> tuple[dict, list[dict]]:
         observed = {"prices": _received(case["prices_before"] | after["prices"]), "rate": _received({"rate": after["rate"]})["rate"]}
         rankings = {
-            market: ([{"rank": rank, "symbol": symbol, "change_rate": rate} for rank, symbol, rate in items], datetime.fromisoformat(at))
+            market: ([{"rank": rank, "symbol": symbol, "change_rate": rate, "last_price": price} for rank, symbol, rate, price in items], datetime.fromisoformat(at))
             for market, (items, at) in (("KR", case["kr_rankings"]), ("US", after["us_rankings"]))
         }
-        candidates = v6_head.candidates_at(cutoff, rankings, infos, case["saved_infos"], holdings, case["open_at"])
+        total, used = v6_head.valuation(state, observed, cutoff)
+        candidates = v6_head.candidates_at(cutoff, rankings, infos, case["saved_infos"], holdings, case["open_at"], total, used)
         _, _, summary = v6_head.account(state, observed, cutoff, case["bases"], case["history"], case["blocked"], candidates)
         news = _news(case["news_items"] + [after["late_news"]], cutoff, _time(case["now"]), fixture["naver"])
         return v6_head.build_input(case["slot"], case["open_at"], case["ends_at"], summary, candidates, news, case["decisions"]), candidates
 
     current = ({info["symbol"]: info for info in case["infos"]}, datetime.fromisoformat(case["infos_observed"]))
+    small = case["small"]  # 1주가 정확히 40%면 남고, 가격을 모르면 빠지며, 40%를 넘어도 보유 종목은 남는다
+    _, used = v6_head.valuation(state, {"prices": _received(case["prices_before"]), "rate": None}, cutoff)
+    ranked = [{"rank": rank, "symbol": symbol, "change_rate": rate, "last_price": price} for rank, symbol, rate, price in case["kr_rankings"][0] + small["rankings"]]
+    infos = (current[0] | {info["symbol"]: info for info in small["infos"]}, current[1])
+    picked = v6_head.candidates_at(cutoff, {"KR": (ranked, datetime.fromisoformat(case["kr_rankings"][1]))}, infos, case["saved_infos"], holdings, case["open_at"], small["total"], used)
+    assert [[item["symbol"], item["one_share_pct"]] for item in picked] == small["expected"], picked
     first, candidates = content(case["after_c"][0], current)
     second, _ = content(case["after_c"][1], current)
     assert first == second, "C 뒤에 받은 랭킹·현재가·환율과 C 뒤 기사를 바꿨더니 입력이 바뀌었다"
@@ -534,7 +541,7 @@ def _run_routes(fixture: dict) -> dict:
     }
     for market, items in run["rankings"].items():
         routes[f"/api/v1/rankings?marketCountry={market}"] = [
-            {"body": {"result": {"rankedAt": "2026-11-17T10:40:00+09:00", "rankings": [{"rank": rank, "symbol": symbol, "price": {"changeRate": rate}} for rank, symbol, rate in items]}}}
+            {"body": {"result": {"rankedAt": "2026-11-17T10:40:00+09:00", "rankings": [{"rank": rank, "symbol": symbol, "price": {"changeRate": rate, "lastPrice": price}} for rank, symbol, rate, price in items]}}}
         ]
     return routes
 

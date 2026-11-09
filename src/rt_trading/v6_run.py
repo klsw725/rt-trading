@@ -346,12 +346,14 @@ def _judge(
         v6_paper.remember(conn, {"prices": prices, "rate": rate})
         v6_paper.bases(conn, clock())
         blocked = v6_paper.blocked_reasons(conn, clock())
-        candidates = v6_head.candidates_at(cutoff, rankings, infos_pair, v6_paper.instruments(conn), holdings, open_at)
         day = decided.date().isoformat()
         bases = {"daily": _base(conn, "daily", day), "weekly": _base(conn, "weekly", _monday(day))}
         history = [equity for (equity,) in conn.execute("SELECT equity FROM valuations WHERE kind = 'watch' AND slot <= ? ORDER BY slot", (slot,))]
+        state, observed = v6_paper.state(conn), {"prices": prices, "rate": rate}
         try:
-            total, used, summary = v6_head.account(v6_paper.state(conn), {"prices": prices, "rate": rate}, cutoff, bases, history, blocked, candidates)
+            total, used = v6_head.valuation(state, observed, cutoff)
+            candidates = v6_head.candidates_at(cutoff, rankings, infos_pair, v6_paper.instruments(conn), holdings, open_at, total, used)
+            total, used, summary = v6_head.account(state, observed, cutoff, bases, history, blocked, candidates)
         except v6_head.HeadError as error:
             row = _missing_row(slot, error.code, clock())
             v6_head.record(conn, paths.head, row, None)

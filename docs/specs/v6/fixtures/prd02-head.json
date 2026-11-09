@@ -26,7 +26,16 @@
     "blocked": [],
     "prices": ["186000", "185000", "180000", "176.5", "170.0", "1350", "999.99", "123.45", "9999", "1111.11"],
     "prices_before": {"005930": ["186000", "2026-11-17T10:41:10+09:00"]},
-    "kr_rankings": [[[1, "005930", "-0.0111"], [2, "000660", "0.012"]], "2026-11-17T10:41:20+09:00"],
+    "kr_rankings": [[[1, "005930", "-0.0111", "186000"], [2, "000660", "0.012", "1125000"]], "2026-11-17T10:41:20+09:00"],
+    "small": {
+      "total": 400000,
+      "rankings": [[3, "100001", "0.01", "160000"], [4, "100002", "0.02", null]],
+      "infos": [
+        {"symbol": "100001", "name": "가상주식1", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:41:30+09:00"},
+        {"symbol": "100002", "name": "가상주식2", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:41:30+09:00"}
+      ],
+      "expected": [["100001", 40.0], ["005930", 46.5], ["NVDA", 59.57]]
+    },
     "infos_observed": "2026-11-17T10:41:30+09:00",
     "infos": [
       {"symbol": "005930", "name": "삼성전자", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:41:30+09:00"},
@@ -40,13 +49,13 @@
       {
         "prices": {"NVDA": ["999.99", "2026-11-17T10:42:05+09:00"]},
         "rate": ["9999.00", "2026-11-17T10:42:01+09:00"],
-        "us_rankings": [[[1, "NVDA", "-0.05"], [2, "AAPL", "0.01"]], "2026-11-17T10:42:03+09:00"],
+        "us_rankings": [[[1, "NVDA", "-0.05", "176.85"], [2, "AAPL", "0.01", "270.10"]], "2026-11-17T10:42:03+09:00"],
         "late_news": {"title": "뒤 기사 A", "originallink": "https://late.example.com/a", "link": "https://n.news.naver.com/la", "description": "늦은 요약 A", "pubDate": "Tue, 17 Nov 2026 10:43:00 +0900"}
       },
       {
         "prices": {"NVDA": ["123.45", "2026-11-17T10:42:09+09:00"]},
         "rate": ["1111.11", "2026-11-17T10:42:02+09:00"],
-        "us_rankings": [[[1, "TSLA", "0.03"]], "2026-11-17T10:42:07+09:00"],
+        "us_rankings": [[[1, "TSLA", "0.03", "400.00"]], "2026-11-17T10:42:07+09:00"],
         "late_news": {"title": "뒤 기사 B", "originallink": "https://late.example.com/b", "link": "https://n.news.naver.com/lb", "description": "늦은 요약 B", "pubDate": "Tue, 17 Nov 2026 10:44:00 +0900"}
       }
     ],
@@ -100,9 +109,8 @@
         "buy_blocked": []
       },
       "candidates": [
-        {"symbol": "005930", "name": "삼성전자", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": -1.11, "rank": 1, "held": true},
-        {"symbol": "000660", "name": "SK하이닉스", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": 1.2, "rank": 2, "held": false},
-        {"symbol": "NVDA", "name": "엔비디아", "market": "US", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": null, "rank": null, "held": true}
+        {"symbol": "005930", "name": "삼성전자", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": -1.11, "rank": 1, "held": true, "one_share_pct": 23.3},
+        {"symbol": "NVDA", "name": "엔비디아", "market": "US", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": null, "rank": null, "held": true, "one_share_pct": 29.85}
       ],
       "news": [
         {"published_at": "2026-11-17T10:41:00+09:00", "source": "news.example.org", "title": "환율 \"안정\"", "summary": "요약 2"},

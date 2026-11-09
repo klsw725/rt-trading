@@ -57,7 +57,7 @@
 4. 지금이 C와 같거나 늦은데 T 판단이 없으면 판단하지 않고 `missing`(오류 `V6_STARTED_LATE`)을 기록한다.
 5. T 차례 10분 평가가 없으면 먼저 `v6-watch`와 같은 일을 한다. 그래서 매시 40분에는 평가와 손실 한도가 C 평가보다 먼저다.
 6. 잠금 밖에서 마감 C로 받는다: 보유 종목 현재가와 환율(PRD 03), E에 열린 시장의 랭킹과 랭킹·보유 종목의 종목 정보(PRD 01), 뉴스(`v4_news.fetch`, cutoff C, 받기 마감 C, 파일 `data/v6/news/{날짜}/{HHMM}.json`).
-7. 한 트랜잭션: T 판단이 아직 없는지 확인하고, 받은 종목 정보·현재가·환율을 쓰고, PRD 03 `bases`와 `blocked_reasons`, PRD 02 `candidates_at`과 `account`로 C 평가를 만들어 `valuations`에 `kind = c`로 쓴다. 커밋한 뒤 입력과 `observations`를 만든다.
+7. 한 트랜잭션: T 판단이 아직 없는지 확인하고, 받은 종목 정보·현재가·환율을 쓰고, PRD 03 `bases`와 `blocked_reasons`, PRD 02 `valuation`·`candidates_at`·`account`로 C 평가를 만들어 `valuations`에 `kind = c`로 쓴다. 커밋한 뒤 입력과 `observations`를 만든다.
 8. PRD 02 `decide`로 판단하고(E까지), 한 트랜잭션으로 PRD 02 `record`를 한다.
 9. `targets`가 `None`이 아니면(빈 `{}`도 포함) E 뒤에 목표·보유 종목 가운데 거래할 종목의 호가를 마감 E + 40초로 받는다(PRD 03 `observe_books`). 한 트랜잭션: T의 `rebalanced` 사건이 없는지 확인하고, 그때의 `blocked_reasons`로 `rebalance`(체결 뒤 `check` 포함)를 하고, `rebalanced` 사건을 쓴다. 받은 호가와 시각을 `head/{날짜}/{HHMM}/orderbook.json`에 쓴다.
 
