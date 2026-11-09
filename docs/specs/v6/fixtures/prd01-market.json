@@ -1,0 +1,129 @@
+{
+  "sessions": {
+    "now": "2026-11-16T23:00:00",
+    "kr_standard": {"preMarket": ["08:00", "09:00"], "regularMarket": ["09:00", "15:30"], "afterMarket": ["15:30", "20:00"]},
+    "us_standard": {
+      "dayMarket": [0, "10:00", 0, "18:00"],
+      "preMarket": [0, "18:00", 0, "23:30"],
+      "regularMarket": [0, "23:30", 1, "06:00"],
+      "afterMarket": [1, "06:00", 1, "09:50"]
+    },
+    "holidays": {"KR": ["2026-11-20"], "US": ["2026-11-19", "2026-11-21"]},
+    "overrides": {
+      "KR": {"2026-11-23": {"preMarket": ["08:43", "09:00"]}},
+      "US": {"2026-11-20": {"afterMarket": [1, "06:00", 1, "08:43"]}}
+    },
+    "responses": [
+      {"market": "KR", "query": "2026-11-17", "days": {"previousBusinessDay": "2026-11-16", "today": "2026-11-17", "nextBusinessDay": "2026-11-18"}},
+      {"market": "KR", "query": "2026-11-19", "days": {"previousBusinessDay": "2026-11-18", "today": "2026-11-19", "nextBusinessDay": "2026-11-23"}},
+      {"market": "KR", "query": "2026-11-20", "days": {"previousBusinessDay": "2026-11-19", "today": "2026-11-20", "nextBusinessDay": "2026-11-23"}},
+      {"market": "US", "query": "2026-11-16", "days": {"previousBusinessDay": "2026-11-13", "today": "2026-11-16", "nextBusinessDay": "2026-11-17"}},
+      {"market": "US", "query": "2026-11-19", "days": {"previousBusinessDay": "2026-11-18", "today": "2026-11-19", "nextBusinessDay": "2026-11-20"}},
+      {"market": "US", "query": "2026-11-21", "days": {"previousBusinessDay": "2026-11-20", "today": "2026-11-21", "nextBusinessDay": "2026-11-23"}}
+    ],
+    "failing": "2026-11-17",
+    "expected_sessions": {
+      "2026-11-16T12:45:00": {"KR": "regular", "US": "day"},
+      "2026-11-17T08:45:00": {"KR": "pre", "US": "after"},
+      "2026-11-17T12:45:00": {"KR": "regular", "US": "day"},
+      "2026-11-17T16:45:00": {"KR": "after", "US": "day"},
+      "2026-11-17T20:45:00": {"KR": null, "US": "pre"},
+      "2026-11-18T01:45:00": {"KR": null, "US": "regular"},
+      "2026-11-19T12:45:00": {"KR": "regular", "US": null},
+      "2026-11-20T12:45:00": {"KR": null, "US": "day"},
+      "2026-11-21T07:45:00": {"KR": null, "US": "after"},
+      "2026-11-21T08:45:00": {"KR": null, "US": null},
+      "2026-11-23T08:45:00": {"KR": "pre", "US": null},
+      "2026-11-24T12:45:00": null
+    },
+    "expected_slots": {
+      "2026-11-21": [["00:40", "slot"], ["01:40", "slot"], ["02:40", "slot"], ["03:40", "slot"], ["04:40", "slot"], ["05:40", "slot"], ["06:40", "slot"], ["07:40", "slot"]],
+      "2026-11-22": [],
+      "2026-11-23": [
+        ["08:40", "slot"], ["09:40", "slot"], ["10:40", "slot"], ["11:40", "slot"], ["12:40", "slot"], ["13:40", "slot"], ["14:40", "slot"], ["15:40", "slot"],
+        ["16:40", "slot"], ["17:40", "slot"], ["18:40", "slot"], ["19:40", "slot"], ["20:40", "slot"], ["21:40", "slot"], ["22:40", "slot"], ["23:40", "slot"]
+      ],
+      "2026-11-24": [
+        ["00:40", "missing"], ["01:40", "missing"], ["02:40", "missing"], ["03:40", "missing"], ["04:40", "missing"], ["05:40", "missing"],
+        ["06:40", "missing"], ["07:40", "missing"], ["08:40", "missing"], ["09:40", "missing"], ["10:40", "missing"], ["11:40", "missing"],
+        ["12:40", "missing"], ["13:40", "missing"], ["14:40", "missing"], ["15:40", "missing"], ["16:40", "missing"], ["17:40", "missing"],
+        ["18:40", "missing"], ["19:40", "missing"], ["20:40", "missing"], ["21:40", "missing"], ["22:40", "missing"], ["23:40", "missing"]
+      ]
+    },
+    "tradable": [
+      {"info": {"market": "KR", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0}, "expect": {"pre": true, "regular": true, "after": true, "closed": false}},
+      {"info": {"market": "KR", "nxt_supported": 0, "nxt_suspended": 0, "krx_suspended": 0}, "expect": {"pre": false, "regular": true, "after": false, "closed": false}},
+      {"info": {"market": "KR", "nxt_supported": 1, "nxt_suspended": 1, "krx_suspended": 0}, "expect": {"pre": false, "regular": true, "after": false, "closed": false}},
+      {"info": {"market": "KR", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 1}, "expect": {"pre": true, "regular": false, "after": true, "closed": false}},
+      {"info": {"market": "US", "nxt_supported": 0, "nxt_suspended": 0, "krx_suspended": 0}, "expect": {"day": true, "pre": true, "regular": true, "after": true, "closed": false}}
+    ],
+    "fill_boundaries": [
+      {"day": "2026-11-21", "slot": "08:40", "info": {"market": "US", "nxt_supported": 0, "nxt_suspended": 0, "krx_suspended": 0}, "at_t": "after", "tradable_now": false},
+      {"day": "2026-11-23", "slot": "08:40", "info": {"market": "KR", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0}, "at_t": null, "tradable_now": true}
+    ]
+  },
+  "candidates": {
+    "now": "2026-11-17T10:41:00",
+    "open_at": {"KR": "regular", "US": "day"},
+    "holdings": {"005930": 3, "122630": 2, "MSFT": 1, "000020": 0},
+    "rankings": {
+      "KR": [
+        [1, "005930", "-0.0111"], [2, "122630", "-0.0145"], [3, "252670", "0.024"], [4, "069500", "-0.0065"], [5, "114800", "0.0082"],
+        [6, "500001", "0.01"], [7, "000010", "0.02"], [8, "000020", "-0.03"], [9, "000030", "0.05"], [10, "000040", "0.001"],
+        [11, "100001", "0.0125"], [12, "100002", null], [13, "100003", "-0.00004"], [14, "100004", "0.1"], [15, "100005", "0.00005"],
+        [16, "100006", "-0.2"], [17, "100007", "0.0333"], [18, "100008", "0.04"], [19, "100009", "0.05"], [20, "999999", "0.01"]
+      ],
+      "US": [
+        [1, "SOXL", "-0.0465"], [2, "NVDA", "-0.0503"], [3, "SOXS", "0.0469"], [4, "TSM", "0.01"],
+        [5, "QQQ", "-0.0029"], [6, "SH", "0.003"], [7, "OLDX", "0.02"], [8, "VXX", "0.05"]
+      ]
+    },
+    "stocks": [
+      ["005930", "삼성전자", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, true, false, false]],
+      ["122630", "KODEX 레버리지", "KOSPI", "ETF", "ACTIVE", "KRW", "2", [false, false, false, null]],
+      ["252670", "KODEX 200선물인버스2X", "KOSPI", "ETF", "ACTIVE", "KRW", "-2", [false, false, false, null]],
+      ["069500", "KODEX 200", "KOSPI", "ETF", "ACTIVE", "KRW", "1", [false, false, false, null]],
+      ["114800", "KODEX 인버스", "KOSPI", "ETF", "ACTIVE", "KRW", "-1", [false, false, false, null]],
+      ["500001", "가상 ETN", "KOSPI", "ETN", "ACTIVE", "KRW", "1", [false, false, false, null]],
+      ["000010", "상장 예정", "KOSDAQ", "STOCK", "SCHEDULED", "KRW", null, [false, false, false, null]],
+      ["000020", "거래정지", "KOSDAQ", "STOCK", "ACTIVE", "KRW", null, [false, true, true, false]],
+      ["000030", "정리매매", "KOSDAQ", "STOCK", "ACTIVE", "KRW", null, [true, false, false, null]],
+      ["000040", "상장폐지", "KOSDAQ", "STOCK", "DELISTED", "KRW", null, [false, false, false, null]],
+      ["100001", "가상주식1", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, true, false, false]],
+      ["100002", "가상주식2", "KOSDAQ", "STOCK", "ACTIVE", "KRW", null, [false, false, false, null]],
+      ["100003", "가상주식3", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, true, false, false]],
+      ["100004", "가상주식4", "KOSDAQ", "STOCK", "ACTIVE", "KRW", null, [false, false, false, null]],
+      ["100005", "가상주식5", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, true, false, false]],
+      ["100006", "가상주식6", "KOSDAQ", "STOCK", "ACTIVE", "KRW", null, [false, false, false, null]],
+      ["100007", "가상주식7", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, true, false, false]],
+      ["100008", "가상주식8", "KOSDAQ", "STOCK", "ACTIVE", "KRW", null, [false, false, false, null]],
+      ["100009", "가상주식9", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, true, false, false]],
+      ["NVDA", "엔비디아", "NASDAQ", "STOCK", "ACTIVE", "USD", null, null],
+      ["SOXL", "디렉시온 반도체 3배", "AMEX", "ETF", "ACTIVE", "USD", "3", null],
+      ["SOXS", "디렉시온 반도체 -3배", "AMEX", "ETF", "ACTIVE", "USD", "-3", null],
+      ["TSM", "TSMC ADR", "NYSE", "DEPOSITARY_RECEIPT", "ACTIVE", "USD", null, null],
+      ["QQQ", "인베스코 QQQ", "NASDAQ", "ETF", "ACTIVE", "USD", "1", null],
+      ["SH", "프로셰어즈 숏 S&P500", "AMEX", "ETF", "ACTIVE", "USD", "-1", null],
+      ["OLDX", "상장폐지 미국", "NYSE", "STOCK", "DELISTED", "USD", null, null],
+      ["VXX", "가상 미국 ETN", "AMEX", "ETN", "ACTIVE", "USD", "1", null],
+      ["MSFT", "마이크로소프트", "NASDAQ", "STOCK", "ACTIVE", "USD", null, null]
+    ],
+    "expected": [
+      {"symbol": "005930", "name": "삼성전자", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": -1.11, "rank": 1, "held": true},
+      {"symbol": "069500", "name": "KODEX 200", "market": "KR", "type": "ETF", "leverage": 1, "tradable_now": true, "exit_only": false, "change_pct": -0.65, "rank": 4, "held": false},
+      {"symbol": "114800", "name": "KODEX 인버스", "market": "KR", "type": "ETF", "leverage": -1, "tradable_now": true, "exit_only": false, "change_pct": 0.82, "rank": 5, "held": false},
+      {"symbol": "100001", "name": "가상주식1", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": 1.25, "rank": 11, "held": false},
+      {"symbol": "100002", "name": "가상주식2", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": null, "rank": 12, "held": false},
+      {"symbol": "100003", "name": "가상주식3", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": 0.0, "rank": 13, "held": false},
+      {"symbol": "100004", "name": "가상주식4", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": 10.0, "rank": 14, "held": false},
+      {"symbol": "100005", "name": "가상주식5", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": 0.01, "rank": 15, "held": false},
+      {"symbol": "100006", "name": "가상주식6", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": -20.0, "rank": 16, "held": false},
+      {"symbol": "100007", "name": "가상주식7", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": 3.33, "rank": 17, "held": false},
+      {"symbol": "NVDA", "name": "엔비디아", "market": "US", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": -5.03, "rank": 2, "held": false},
+      {"symbol": "QQQ", "name": "인베스코 QQQ", "market": "US", "type": "ETF", "leverage": 1, "tradable_now": true, "exit_only": false, "change_pct": -0.29, "rank": 5, "held": false},
+      {"symbol": "SH", "name": "프로셰어즈 숏 S&P500", "market": "US", "type": "ETF", "leverage": -1, "tradable_now": true, "exit_only": false, "change_pct": 0.3, "rank": 6, "held": false},
+      {"symbol": "122630", "name": "KODEX 레버리지", "market": "KR", "type": "ETF", "leverage": 2, "tradable_now": true, "exit_only": true, "change_pct": -1.45, "rank": 2, "held": true},
+      {"symbol": "MSFT", "name": "마이크로소프트", "market": "US", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": null, "rank": null, "held": true}
+    ]
+  }
+}

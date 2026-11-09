@@ -36,6 +36,7 @@ from rt_trading import (
     v5_report,
     v5_serve,
     v5_target,
+    v6_acceptance,
     web_acceptance,
 )
 
@@ -104,6 +105,8 @@ def main() -> None:
     v5_check.add_argument("--order", action="store_true")
     v5_serve_args = commands.add_parser("v5-serve", help="아침 실행·판단 차례 자동 실행, 실행기 돌보기와 보기 전용 현황 웹페이지(서버의 Docker 컨테이너에서 쓴다)")
     v5_serve_args.add_argument("--host", default="127.0.0.1")
+    v6_checks = commands.add_parser("v6-acceptance", help="v6 acceptance를 네트워크 없이 실행한다")
+    v6_checks.add_argument("--prd", choices=sorted(v6_acceptance.CASES))
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -139,6 +142,8 @@ def main() -> None:
         sys.exit(web_acceptance.run())
     if args.command == "v5-acceptance":
         sys.exit(v5_acceptance.run(args.prd))
+    if args.command == "v6-acceptance":
+        sys.exit(v6_acceptance.run(args.prd))
     if args.command == "v5-daily":
         sys.exit(run_v5_daily())
     if args.command == "v5-decide":

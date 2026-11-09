@@ -23,6 +23,8 @@ TOKEN_MARGIN = timedelta(minutes=10)  # 만료까지 이보다 적게 남은 토
 _sleep = time.sleep  # acceptance가 기다린 시간을 기록하려고 바꿔 끼운다
 INTERRUPT: ContextVar[Callable[[], bool] | None] = ContextVar("INTERRUPT", default=None)  # v5 실행기의 새 정지 확인. 없으면 보내기와 기다리기가 이전과 같다
 DEADLINE: ContextVar[float | None] = ContextVar("DEADLINE", default=None)  # v5 실행기가 요청 하나의 응답을 기다리는 벽시계 상한(초). 없으면 httpx 시간 제한만 쓴다
+RATE_LIMIT_RETRIES: ContextVar[int | None] = ContextVar("RATE_LIMIT_RETRIES", default=None)  # v6: 429 뒤 다시 보내는 횟수 상한. 없으면 retry일 때 끝없이 다시 보낸다
+ON_RATE_LIMIT: ContextVar[Callable[[str], None] | None] = ContextVar("ON_RATE_LIMIT", default=None)  # v6: 429를 받을 때마다 그 경로로 부른다. 없으면 부르지 않는다
 
 
 class Interrupted(Exception):
@@ -259,12 +261,12 @@ def _send(
 ) -> httpx.Response:
     """요청을 보내고 오류를 코드로 나눈다.
 
-    retry면 429는 Retry-After초 기다려 다시 보내고, 5xx와 네트워크 오류는 1·2·4초 뒤 세 번까지 다시 보낸다.
+    retry면 429는 Retry-After초 기다려 다시 보내고(RATE_LIMIT_RETRIES가 있으면 그 횟수까지), 5xx와 네트워크 오류는 1·2·4초 뒤 세 번까지 다시 보낸다.
     token(SharedToken)을 주면 보낼 때마다 그 값을 Authorization 헤더에 넣고, 토큰 오류를 받으면 토큰을 바꿔 한 번 다시 보낸다.
     retry가 거짓이면 한 번만 보낸다(v5 주문 생성). 토큰 오류면 토큰을 바꿔 두기만 하고 오류를 낸다.
     INTERRUPT(v5 실행기)가 참이면 보내기 직전과 다시 보내기를 기다리는 동안 Interrupted로 그만둔다. DEADLINE이 있으면 요청 하나를 그 초까지만 기다린다.
     """
-    waits, renewed = iter(RETRY_WAITS), False
+    waits, renewed, limited = iter(RETRY_WAITS), False, 0
     while True:
         if token is not None:
             kwargs["headers"] = {**kwargs.get("headers", {}), "Authorization": f"Bearer {token}"}
@@ -285,8 +287,12 @@ def _send(
             continue
         if response.status_code == 429:
             seconds = float(response.headers.get("Retry-After", 1))
-            if not retry:
+            if (notify := ON_RATE_LIMIT.get()) is not None:
+                notify(path)
+            cap = RATE_LIMIT_RETRIES.get()
+            if not retry or (cap is not None and limited >= cap):
                 raise TossError("V5_TOSS_RATE_LIMITED", f"요청 한도를 넘었다({seconds:g}초 뒤 다시)", _remote(response), 429, seconds)
+            limited += 1
             _wait(seconds)
             continue
         if response.status_code == 401:
