@@ -3,7 +3,9 @@
 import contextlib
 import io
 import json
+import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import date as Date
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -12,7 +14,7 @@ from unittest import mock
 
 import httpx
 
-from rt_trading import codex, toss, v4_news, v6_head, v6_market
+from rt_trading import codex, toss, v4_news, v6_head, v6_market, v6_paper
 from rt_trading.toss import KST
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,7 +46,7 @@ class Clock:
 class FakeToss:
     """미리 적은 응답을 돌려주는 가짜 토스. 요청 열쇠를 기록한다.
 
-    routes는 열쇠(경로, 쿼리에 date·marketCountry가 있으면 "?이름=값"을 붙인다) → 응답 목록이고 마지막 응답을 되풀이한다.
+    routes는 열쇠(경로, 쿼리에 date·marketCountry·symbol이 있으면 "?이름=값"을 붙인다) → 응답 목록이고 마지막 응답을 되풀이한다.
     응답은 {"status", "body", "headers", "elapsed"}(status 기본 200) 또는 "network"이고, 받을 때마다 시계를 elapsed초만큼 움직인다.
     """
 
@@ -53,7 +55,7 @@ class FakeToss:
         self.requests: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        key = request.url.path + "".join(f"?{name}={request.url.params[name]}" for name in ("date", "marketCountry") if name in request.url.params)
+        key = request.url.path + "".join(f"?{name}={request.url.params[name]}" for name in ("date", "marketCountry", "symbol") if name in request.url.params)
         self.requests.append(key)
         responses = self.routes[key]
         response = responses.pop(0) if len(responses) > 1 else responses[0]
@@ -292,6 +294,188 @@ def case_head_response() -> None:
         assert v6_head.targets(row) == expected, (name, v6_head.targets(row))
 
 
+# PRD 03 모의 계좌
+
+
+def _standard_calendar(spec: dict) -> dict:
+    """fixture의 국내·미국 영업일에 2026-11-09 기준 세션 시각을 넣은 장 운영 정보. 영업일이 아닌 날은 휴장일이다."""
+    calendar, day, last = {"KR": {}, "US": {}}, Date.fromisoformat(spec["first"]), Date.fromisoformat(spec["last"])
+    while day <= last:
+        text, after = day.isoformat(), (day + timedelta(days=1)).isoformat()
+        calendar["KR"][text] = (
+            {"pre": [f"{text}T08:00:00+09:00", f"{text}T09:00:00+09:00"], "regular": [f"{text}T09:00:00+09:00", f"{text}T15:30:00+09:00"], "after": [f"{text}T15:30:00+09:00", f"{text}T20:00:00+09:00"]}
+            if text in spec["kr_days"]
+            else {}
+        )
+        calendar["US"][text] = (
+            {
+                "day": [f"{text}T10:00:00+09:00", f"{text}T18:00:00+09:00"],
+                "pre": [f"{text}T18:00:00+09:00", f"{text}T23:30:00+09:00"],
+                "regular": [f"{text}T23:30:00+09:00", f"{after}T06:00:00+09:00"],
+                "after": [f"{after}T06:00:00+09:00", f"{after}T09:50:00+09:00"],
+            }
+            if text in spec["us_days"]
+            else {}
+        )
+        day += timedelta(days=1)
+    return calendar
+
+
+def _paper_infos(rows: list[list]) -> dict[str, dict]:
+    """[종목, 시장, 유형, 배수, NXT 지원(, 상장 상태)]로 instruments 행을 만든다."""
+    infos = {}
+    for symbol, market, kind, leverage, nxt, *status in rows:
+        infos[symbol] = {
+            "symbol": symbol, "name": symbol, "market": market, "security_type": kind, "status": status[0] if status else "ACTIVE",
+            "currency": "KRW" if market == "KR" else "USD", "leverage": leverage, "nxt_supported": nxt, "nxt_suspended": 0, "krx_suspended": 0,
+            "liquidation": 0, "observed_at": "2026-11-12T09:00:00+09:00",
+        }
+    return infos
+
+
+def _paper_ledger(conn: sqlite3.Connection, day: str, raw: dict, infos: dict[str, dict], base: int | None = None) -> None:
+    """시작일 day로 장부를 만들고 fixture의 현금·보유와 종목 정보를 넣는다. base가 있으면 기준을 그 값으로 바꾼다."""
+    v6_paper.start(conn, day)
+    if base is not None:
+        conn.execute("UPDATE baselines SET equity = ?", (base,))
+    conn.execute("UPDATE cash SET amount = ? WHERE currency = 'KRW'", (str(raw["krw"]),))
+    conn.execute("UPDATE cash SET amount = ? WHERE currency = 'USD'", (raw["usd"],))
+    for symbol, (quantity, average) in raw["positions"].items():
+        conn.execute("INSERT INTO positions VALUES (?, ?, ?, ?, ?)", (symbol, infos[symbol]["market"], infos[symbol]["currency"], quantity, average))
+    v6_paper.save_instruments(conn, infos)
+
+
+def _paper_book(spec: dict, at: datetime) -> dict:
+    """체결 시각 at에서 요청·받은·데이터 시각을 초로 적은 호가(기본 +1초, +2초, +0초)."""
+    stamp = spec.get("timestamp", 0)
+    return {
+        "requested_at": at + timedelta(seconds=spec.get("requested", 1)),
+        "observed_at": at + timedelta(seconds=spec.get("observed", 2)),
+        "timestamp": None if stamp is None else at + timedelta(seconds=stamp),
+        "asks": [(Decimal(price), volume) for price, volume in spec.get("asks", [])],
+        "bids": [(Decimal(price), volume) for price, volume in spec.get("bids", [])],
+    }
+
+
+def _same_value(actual: object, expected: object) -> bool:
+    """수로 읽히는 글자는 수로 비교한다(0.00과 0은 같다)."""
+    if isinstance(expected, str) and isinstance(actual, str):
+        try:
+            return Decimal(actual) == Decimal(expected)
+        except ArithmeticError:
+            return actual == expected
+    return actual == expected
+
+
+def _paper_rebalance(fixture: dict, case: dict) -> None:
+    """판단 체결 하나를 돌려 체결 행·보유·현금을 손 계산과 비교한다."""
+    calendar, infos, at = _standard_calendar(fixture["calendar"]), _paper_infos(fixture["instruments"]), _time(case["at"])
+    with closing(sqlite3.connect(":memory:")) as conn:
+        _paper_ledger(conn, at.date().isoformat(), case["state"], infos, 100000)
+        used = {key: (Decimal(value), at, True) for key, value in case["c_used"].items()}
+        v6_paper.record_valuation(conn, v6_head.times(case["turn"])[1].strftime("%Y-%m-%d %H:%M"), "c", at, case["a_c"], v6_paper.state(conn), used, [])
+        targets = {symbol: Decimal(weight) for symbol, weight in case["targets"].items()}
+        rate = None if case["rate_c"] is None else Decimal(case["rate_c"])
+        books = {symbol: _paper_book(spec, at) for symbol, spec in case["books"].items()}
+        v6_paper.rebalance(conn, case["turn"], at, v6_market.sessions(calendar, at), targets, case["a_c"], rate, books, False, calendar)
+        fills = [dict(zip(v6_paper.FILL_COLUMNS, row)) for row in conn.execute(f"SELECT {', '.join(v6_paper.FILL_COLUMNS)} FROM fills ORDER BY id")]
+        ledger = v6_paper.state(conn)
+    expected = case["expected"]
+    assert len(fills) == len(expected["fills"]), (case.get("name"), [(fill["symbol"], fill["side"], fill["quantity"]) for fill in fills])
+    for fill, want in zip(fills, expected["fills"]):
+        for key, value in want.items():
+            actual = json.loads(fill[key]) if key == "levels" else fill[key]
+            same = [[Decimal(p), q] for p, q in actual] == [[Decimal(p), q] for p, q in value] if key == "levels" else _same_value(actual, value)
+            assert same, (case.get("name"), fill["symbol"], key, actual, value)
+    positions = {symbol: [item["quantity"], item["avg_price"]] for symbol, item in ledger["positions"].items()}
+    assert positions.keys() == expected["positions"].keys(), (case.get("name"), positions)
+    for symbol, (quantity, average) in expected["positions"].items():
+        assert positions[symbol][0] == quantity and positions[symbol][1] == Decimal(average), (case.get("name"), symbol, positions[symbol])
+    assert (ledger["krw"], ledger["usd"]) == (expected["krw"], Decimal(expected["usd"])), (case.get("name"), ledger["krw"], ledger["usd"])
+
+
+def case_paper_fills() -> None:
+    fixture = _fixture("prd03-paper.json")
+    observe = fixture["observe"]
+    clock, fill_at = Clock(_time(observe["now"])), _time(observe["fill_at"])
+    routes = {"/api/v1/exchange-rate": [{"body": {"result": observe["rate"]}}]}
+    routes |= {f"/api/v1/orderbook?symbol={symbol}": [{"elapsed": item["elapsed"], "body": {"result": item["body"]}}] for symbol, item in observe["books"].items()}
+    with _toss(routes, clock) as (http, token, _):
+        rate, _ = v6_paper.observe_rate(http, token, clock() + timedelta(minutes=1), clock, [])
+        books = v6_paper.observe_books(http, token, sorted(observe["books"]), fill_at, fill_at + v6_paper.BOOK_WAIT, clock, clock.advance, [])
+    assert rate == Decimal(observe["rate"]["midRate"]), rate
+    assert set(books) == {"100001"}, sorted(books)
+    book = books["100001"]
+    assert book["requested_at"] >= fill_at and v6_paper.usable(book, fill_at), book
+    got = {side: [[str(price), volume] for price, volume in book[side]] for side in ("asks", "bids")}
+    assert got == observe["expected_100001"], got
+    for case in fixture["fills"]:
+        _paper_rebalance(fixture, case)
+
+
+def case_paper_cap() -> None:
+    fixture = _fixture("prd03-paper.json")
+    _paper_rebalance(fixture, fixture["cap"] | {"name": "닫힌 시장 보유 1종목과 새 목표 5종목"})
+
+
+def case_paper_limits() -> None:
+    fixture = _fixture("prd03-paper.json")
+    limits, calendar, infos = fixture["limits"], _standard_calendar(fixture["calendar"]), _paper_infos(fixture["instruments"])
+    at = _time("2026-11-17T12:00:00")
+    for case in limits["boundaries"]:
+        with closing(sqlite3.connect(":memory:")) as conn:
+            _paper_ledger(conn, "2026-11-16", {"krw": 100000, "usd": "0", "positions": {"100001": [1, "10000"]}}, infos)
+            conn.execute("INSERT INTO baselines VALUES ('daily', '2026-11-17', ?, 'valuation')", (case["daily"],))
+            conn.execute("UPDATE baselines SET equity = ? WHERE kind = 'weekly' AND key = '2026-11-16'", (case["weekly"],))
+            v6_paper.check(conn, case["equity"], at)
+            got = [list(row) for row in conn.execute("SELECT kind, key FROM limits ORDER BY kind")]
+            started = conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'forced_start'").fetchone()[0]
+        assert got == case["limits"] and started == bool(case["limits"]), (case, got, started)
+    forced = limits["forced"]
+    with closing(sqlite3.connect(":memory:")) as conn:
+        _paper_ledger(conn, "2026-11-16", forced["state"], infos)
+        conn.execute("INSERT INTO limits VALUES (?, ?, ?, 1)", (*forced["limit"], forced["started"]))
+        conn.execute("INSERT INTO events VALUES (?, 'forced_start', 'daily')", (forced["started"],))
+        for step in forced["steps"]:
+            if "buy" in step:  # 강제 매도 중의 판단: 막힌 매수는 체결되지 않는다
+                buy, buy_at = step["buy"], _time(step["buy"]["at"])
+                used = {"UST8": (Decimal("10.00"), buy_at, True), "USDKRW": (Decimal("1350.00"), buy_at, True)}
+                v6_paper.record_valuation(conn, v6_head.times(buy["turn"])[1].strftime("%Y-%m-%d %H:%M"), "c", buy_at, 0, v6_paper.state(conn), used, [])
+                blocked = bool(v6_paper.blocked_reasons(conn, buy_at))
+                targets = {symbol: Decimal(weight) for symbol, weight in buy["targets"].items()}
+                books = {"US01": _paper_book({"asks": buy["asks"]}, buy_at)}
+                v6_paper.rebalance(conn, buy["turn"], buy_at, v6_market.sessions(calendar, buy_at), targets, 1_000_000, Decimal("1350.00"), books, blocked, calendar)
+                bought = conn.execute("SELECT COUNT(*) FROM fills WHERE side = 'BUY'").fetchone()[0]
+                assert blocked and bought == 0 and "US01" not in v6_paper.state(conn)["positions"], (blocked, bought)
+                continue
+            step_at = _time(step["at"])
+            used = {"UST8": (Decimal("10.00"), step_at, True), "USDKRW": (Decimal("1350.00"), step_at, True)}
+            v6_paper.record_valuation(conn, step["turn"], "watch", step_at, 0, v6_paper.state(conn), used, [])
+            before = conn.execute("SELECT COUNT(*) FROM fills").fetchone()[0]
+            book = _paper_book({"bids": step["bids"]}, step_at)
+            v6_paper.force(conn, step["turn"], step_at, v6_market.sessions(calendar, step_at), {"UST8": book})
+            sold = sum(row[0] for row in conn.execute("SELECT quantity FROM fills WHERE rowid > ?", (before,)))
+            left = v6_paper.state(conn)["positions"].get("UST8", {}).get("quantity", 0)
+            assert (sold, left, "forced_sale" in v6_paper.blocked_reasons(conn, step_at)) == (step["sold"], step["left"], step["forced"]), (step, sold, left)
+        assert v6_paper.state(conn)["usd"] == Decimal(forced["usd"]), v6_paper.state(conn)["usd"]
+    case = limits["bases"]
+    with closing(sqlite3.connect(":memory:")) as conn:
+        _paper_ledger(conn, case["start"], {"krw": 500000, "usd": "0", "positions": {}}, infos)
+        for slot, equity in case["valuations"].items():
+            v6_paper.record_valuation(conn, slot, "watch", _time(slot.replace(" ", "T") + ":00"), equity, v6_paper.state(conn), {}, [])
+        for step in case["steps"]:
+            step_at = _time(step["at"])
+            v6_paper.bases(conn, step_at)
+            day = step_at.date().isoformat()
+            daily = conn.execute("SELECT equity, source FROM baselines WHERE kind = 'daily' AND key = ?", (day,)).fetchone()
+            assert (list(daily) if daily else None) == step["daily"], (step, daily)
+            if "weekly" in step:
+                weekly = conn.execute("SELECT equity, source FROM baselines WHERE kind = 'weekly' AND key = ?", (day,)).fetchone()
+                assert list(weekly) == step["weekly"], (step, weekly)
+            if "blocked" in step:
+                assert v6_paper.blocked_reasons(conn, _time(step["blocked_at"])) == step["blocked"], (step, v6_paper.blocked_reasons(conn, _time(step["blocked_at"])))
+
+
 CASES = {
     "01": [
         (
@@ -315,6 +499,20 @@ CASES = {
             "응답: 목록 밖 종목·exit_only 종목·6종목·비중 0.41·비중 합 1.01·겹친 종목은 형식 오류, E 뒤 응답은 late,"
             " 첫 호출이 실패하면 한 번만 더 부름, 실패한 차례는 targets가 None이라 사고팔지 않음",
             case_head_response,
+        ),
+    ],
+    "03": [
+        (
+            "판단 체결: 판 뒤에 사고 목표 수량은 C 평가 자산 기준의 내린 정수 주, E 전 요청·E + 40초 뒤 받음·데이터 시각 없음·5분 넘게 이른 호가는 쓰지 않음,"
+            " 여러 호가 단계를 모의 주문 하나로 모아 수수료·SEC Fee 한 번, 환전 원화(0.05%·0.5%), 미국 수수료 버림, SEC Fee 최저액·반올림, 국내 수수료(정규장·NXT),"
+            " 증권거래세, 국내 ETF 위험 비용, 판 미국 돈은 달러로, C까지 환율이 없으면 미국 새 매수·증액·일부 감액 없이 전량 매도·exit_only 매도는 함, validFrom은 보지 않음",
+            case_paper_fills,
+        ),
+        ("닫힌 시장의 보유 1종목과 새 목표 5종목이면 사고 나서 5종목을 넘는 매수를 하지 않음", case_paper_cap),
+        (
+            "손실 한도가 정확히 −2%·−5%·−20%에서 발동, 일부만 팔린 강제 매도는 날짜·주가 바뀌어도 다 팔 때까지 10분마다 다시 팔고 그동안 사지 않음,"
+            " 월요일이 아닌 날의 00:00 평가가 없으면 앞의 하루 기준으로 그날 사지 않고, 월요일 00:00 평가가 없으면 앞의 한 주 기준으로 그 주 내내 사지 않음",
+            case_paper_limits,
         ),
     ],
 }

@@ -1,0 +1,204 @@
+{
+  "calendar": {
+    "first": "2026-11-12",
+    "last": "2026-11-30",
+    "kr_days": ["2026-11-12", "2026-11-13", "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27", "2026-11-30"],
+    "us_days": ["2026-11-12", "2026-11-13", "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-27", "2026-11-30"]
+  },
+  "instruments": [
+    ["200001", "KR", "STOCK", "", 1], ["200002", "KR", "STOCK", "", 1], ["200003", "KR", "STOCK", "", 1],
+    ["100001", "KR", "STOCK", "", 1], ["100002", "KR", "ETF", "1", 0], ["100003", "KR", "STOCK", "", 1], ["100004", "KR", "STOCK", "", 1],
+    ["300001", "KR", "ETF", "1", 1], ["400001", "KR", "STOCK", "", 0],
+    ["UST1", "US", "STOCK", "", 0], ["UST2", "US", "STOCK", "", 0], ["UST3", "US", "STOCK", "", 0], ["UST4", "US", "STOCK", "", 0],
+    ["UST5", "US", "STOCK", "", 0, "DELISTED"], ["UST6", "US", "STOCK", "", 0], ["UST7", "US", "STOCK", "", 0], ["UST8", "US", "STOCK", "", 0],
+    ["US01", "US", "STOCK", "", 0], ["US02", "US", "STOCK", "", 0], ["US03", "US", "STOCK", "", 0], ["US04", "US", "STOCK", "", 0], ["US05", "US", "STOCK", "", 0]
+  ],
+  "observe": {
+    "now": "2026-11-17T10:44:50",
+    "fill_at": "2026-11-17T10:45:00",
+    "rate": {"rate": "1350.55", "midRate": "1350.05", "basisPoint": "4", "validFrom": "2026-11-15T09:00:00+09:00", "validUntil": "2026-11-15T09:05:00+09:00"},
+    "books": {
+      "100001": {"elapsed": 1, "body": {"timestamp": "2026-11-17T10:45:00+09:00", "currency": "KRW", "asks": [{"price": "10000", "volume": "10"}, {"price": "9990", "volume": "5"}], "bids": [{"price": "9980", "volume": "3.7"}, {"price": "9985", "volume": "2"}]}},
+      "100002": {"elapsed": 45, "body": {"timestamp": "2026-11-17T10:45:30+09:00", "currency": "KRW", "asks": [{"price": "5000", "volume": "100"}], "bids": []}}
+    },
+    "expected_100001": {"asks": [["9990", 5], ["10000", 10]], "bids": [["9985", 2], ["9980", 3]]}
+  },
+  "fills": [
+    {
+      "name": "국내 정규장: 판 뒤 비중 순으로 사고, 호가 세 단계 체결, E 전 요청·E + 40초 뒤 받음·데이터 시각 없음·5분 넘게 이른 호가는 쓰지 않음",
+      "turn": "2026-11-17 10:40",
+      "at": "2026-11-17T10:45:00",
+      "state": {"krw": 400000, "usd": "0", "positions": {"200001": [10, "10000"], "200002": [1, "1000"], "200003": [1, "1000"]}},
+      "c_used": {"200001": "10000", "200002": "1000", "200003": "1000"},
+      "a_c": 502000,
+      "rate_c": "1350.00",
+      "targets": {"100001": "0.4", "100002": "0.3", "100003": "0.1", "100004": "0.1"},
+      "books": {
+        "200001": {"bids": [["10100", 4], ["10050", 4], ["10000", 100]]},
+        "200002": {"timestamp": null, "bids": [["1000", 10]]},
+        "200003": {"timestamp": -360, "bids": [["1000", 10]]},
+        "100001": {"asks": [["9990", 5], ["10000", 10], ["10010", 100]]},
+        "100002": {"asks": [["5000", 100]]},
+        "100003": {"requested": -1, "asks": [["1000", 100]]},
+        "100004": {"observed": 41, "asks": [["1000", 100]]}
+      },
+      "expected": {
+        "fills": [
+          {"symbol": "200001", "side": "SELL", "quantity": 10, "levels": [["10100", 4], ["10050", 4], ["10000", 2]], "amount": "100600", "commission": "15", "tax": "201", "risk_cost": "0", "sec_fee": "0", "fx_usd": "0", "fx_krw": "0", "realized": "384", "krw_after": "500384", "usd_after": "0", "holdings_after": 2},
+          {"symbol": "100001", "side": "BUY", "quantity": 20, "levels": [["9990", 5], ["10000", 10], ["10010", 5]], "amount": "200000", "commission": "30", "tax": "0", "risk_cost": "0", "sec_fee": "0", "fx_usd": "0", "fx_krw": "0", "realized": "0", "krw_after": "300354", "usd_after": "0", "holdings_after": 3},
+          {"symbol": "100002", "side": "BUY", "quantity": 30, "levels": [["5000", 30]], "amount": "150000", "commission": "22", "tax": "0", "risk_cost": "0", "sec_fee": "0", "fx_usd": "0", "fx_krw": "0", "realized": "0", "krw_after": "150332", "usd_after": "0", "holdings_after": 4}
+        ],
+        "positions": {"100001": [20, "10000"], "100002": [30, "5000"], "200002": [1, "1000"], "200003": [1, "1000"]},
+        "krw": 150332,
+        "usd": "0"
+      }
+    },
+    {
+      "name": "애프터마켓(NXT): ETF 차익 매도의 수수료 0.014%와 위험 비용, 정규 외 시간 환전 0.5%, 미국 수수료 0.01달러 아래 버림",
+      "turn": "2026-11-17 16:40",
+      "at": "2026-11-17T16:45:00",
+      "state": {"krw": 300000, "usd": "0", "positions": {"300001": [10, "10000"]}},
+      "c_used": {"300001": "11000", "USDKRW": "1350.00"},
+      "a_c": 410000,
+      "rate_c": "1350.00",
+      "targets": {"UST1": "0.2"},
+      "books": {
+        "300001": {"bids": [["11000", 10]]},
+        "UST1": {"asks": [["20.00", 2], ["20.01", 5]]}
+      },
+      "expected": {
+        "fills": [
+          {"symbol": "300001", "side": "SELL", "quantity": 10, "levels": [["11000", 10]], "amount": "110000", "commission": "15", "tax": "0", "risk_cost": "1540", "sec_fee": "0", "realized": "8445", "krw_after": "408445", "usd_after": "0", "holdings_after": 0},
+          {"symbol": "UST1", "side": "BUY", "quantity": 3, "levels": [["20.00", 2], ["20.01", 1]], "amount": "60.01", "commission": "0.06", "sec_fee": "0", "fx_usd": "60.07", "fx_krw": "81500", "fx_rate": "1350.00", "fx_cost_rate": "0.005", "realized": "0", "krw_after": "326945", "usd_after": "0.00", "holdings_after": 1}
+        ],
+        "positions": {"UST1": [3, "20.00333333333333333333333333"]},
+        "krw": 326945,
+        "usd": "0.00"
+      }
+    },
+    {
+      "name": "국내 거래일 정규 시간 환전 0.05%: 달러 일부가 있을 때 모자란 달러만 환전",
+      "turn": "2026-11-17 10:40",
+      "at": "2026-11-17T10:45:00",
+      "state": {"krw": 100000, "usd": "10.00", "positions": {}},
+      "c_used": {"USDKRW": "1350.00"},
+      "a_c": 113500,
+      "rate_c": "1350.00",
+      "targets": {"UST2": "0.4"},
+      "books": {"UST2": {"asks": [["30.00", 10]]}},
+      "expected": {
+        "fills": [
+          {"symbol": "UST2", "side": "BUY", "quantity": 1, "levels": [["30.00", 1]], "amount": "30.00", "commission": "0.03", "fx_usd": "20.03", "fx_krw": "27055", "fx_rate": "1350.00", "fx_cost_rate": "0.0005", "krw_after": "72945", "usd_after": "0.00", "holdings_after": 1}
+        ],
+        "positions": {"UST2": [1, "30.00"]},
+        "krw": 72945,
+        "usd": "0.00"
+      }
+    },
+    {
+      "name": "토요일 환전 0.5%",
+      "turn": "2026-11-21 07:40",
+      "at": "2026-11-21T07:45:00",
+      "state": {"krw": 50000, "usd": "0", "positions": {}},
+      "c_used": {"USDKRW": "1350.00"},
+      "a_c": 50000,
+      "rate_c": "1350.00",
+      "targets": {"UST3": "0.4"},
+      "books": {"UST3": {"asks": [["10.00", 10]]}},
+      "expected": {
+        "fills": [
+          {"symbol": "UST3", "side": "BUY", "quantity": 1, "levels": [["10.00", 1]], "amount": "10.00", "commission": "0.01", "fx_usd": "10.01", "fx_krw": "13582", "fx_rate": "1350.00", "fx_cost_rate": "0.005", "krw_after": "36418", "usd_after": "0.00", "holdings_after": 1}
+        ],
+        "positions": {"UST3": [1, "10.00"]},
+        "krw": 36418,
+        "usd": "0.00"
+      }
+    },
+    {
+      "name": "C까지 환율이 없는 차례: 미국 새 매수·증액·일부 감액 없음, 목표에서 빠진 보유와 exit_only 보유는 판매, SEC Fee 최저액과 셋째 자리 반올림, 미국 수수료 버림, 판 돈은 달러로",
+      "turn": "2026-11-17 23:40",
+      "at": "2026-11-17T23:45:00",
+      "state": {"krw": 100000, "usd": "0", "positions": {"UST4": [30, "40.00"], "UST5": [1, "12.00"], "UST6": [5, "20.00"]}},
+      "c_used": {"UST4": "40.60", "UST5": "10.00", "UST6": "21.00", "USDKRW": "1350.00"},
+      "a_c": 300000,
+      "rate_c": null,
+      "targets": {"UST6": "0.1", "UST7": "0.2"},
+      "books": {
+        "UST4": {"bids": [["40.63", 15], ["40.61", 15]]},
+        "UST5": {"bids": [["10.00", 5]]},
+        "UST6": {"asks": [["21.05", 10]], "bids": [["21.00", 10]]},
+        "UST7": {"asks": [["15.00", 100]]}
+      },
+      "expected": {
+        "fills": [
+          {"symbol": "UST4", "side": "SELL", "quantity": 30, "levels": [["40.63", 15], ["40.61", 15]], "amount": "1218.60", "commission": "1.21", "sec_fee": "0.03", "realized": "17.36", "usd_after": "1217.36", "krw_after": "100000", "holdings_after": 2},
+          {"symbol": "UST5", "side": "SELL", "quantity": 1, "levels": [["10.00", 1]], "amount": "10.00", "commission": "0.01", "sec_fee": "0.01", "realized": "-2.02", "usd_after": "1227.34", "krw_after": "100000", "holdings_after": 1}
+        ],
+        "positions": {"UST6": [5, "20.00"]},
+        "krw": 100000,
+        "usd": "1227.34"
+      }
+    }
+  ],
+  "cap": {
+    "turn": "2026-11-17 20:40",
+    "at": "2026-11-17T20:45:00",
+    "state": {"krw": 500000, "usd": "0", "positions": {"400001": [1, "10000"]}},
+    "c_used": {"400001": "10000", "USDKRW": "1350.00"},
+    "a_c": 510000,
+    "rate_c": "1350.00",
+    "targets": {"US01": "0.15", "US02": "0.15", "US03": "0.15", "US04": "0.15", "US05": "0.15"},
+    "books": {
+      "US01": {"asks": [["10.00", 100]]}, "US02": {"asks": [["10.00", 100]]}, "US03": {"asks": [["10.00", 100]]},
+      "US04": {"asks": [["10.00", 100]]}, "US05": {"asks": [["10.00", 100]]}
+    },
+    "expected": {
+      "fills": [
+        {"symbol": "US01", "side": "BUY", "quantity": 5, "fx_usd": "50.05", "fx_krw": "67906", "krw_after": "432094", "holdings_after": 2},
+        {"symbol": "US02", "side": "BUY", "quantity": 5, "fx_usd": "50.05", "fx_krw": "67906", "krw_after": "364188", "holdings_after": 3},
+        {"symbol": "US03", "side": "BUY", "quantity": 5, "fx_usd": "50.05", "fx_krw": "67906", "krw_after": "296282", "holdings_after": 4},
+        {"symbol": "US04", "side": "BUY", "quantity": 5, "fx_usd": "50.05", "fx_krw": "67906", "krw_after": "228376", "holdings_after": 5}
+      ],
+      "positions": {"400001": [1, "10000"], "US01": [5, "10.00"], "US02": [5, "10.00"], "US03": [5, "10.00"], "US04": [5, "10.00"]},
+      "krw": 228376,
+      "usd": "0.00"
+    }
+  },
+  "limits": {
+    "boundaries": [
+      {"daily": 500000, "weekly": 510000, "equity": 490000, "limits": [["daily", "2026-11-17"]]},
+      {"daily": 500000, "weekly": 510000, "equity": 490001, "limits": []},
+      {"daily": 400000, "weekly": 500000, "equity": 475000, "limits": [["weekly", "2026-11-16"]]},
+      {"daily": 400000, "weekly": 500000, "equity": 475001, "limits": []},
+      {"daily": 300000, "weekly": 300000, "equity": 400000, "limits": [["cumulative", "all"]]},
+      {"daily": 300000, "weekly": 300000, "equity": 400001, "limits": []}
+    ],
+    "forced": {
+      "state": {"krw": 1000000, "usd": "0", "positions": {"UST8": [10, "10.00"]}},
+      "started": "2026-11-20T23:40:00",
+      "limit": ["daily", "2026-11-20"],
+      "steps": [
+        {"turn": "2026-11-20 23:50", "at": "2026-11-20T23:50:00", "bids": [["10.00", 4]], "sold": 4, "left": 6, "forced": true},
+        {"turn": "2026-11-21 00:00", "at": "2026-11-21T00:00:00", "bids": [["10.00", 3]], "sold": 3, "left": 3, "forced": true},
+        {"buy": {"turn": "2026-11-21 00:40", "at": "2026-11-21T00:45:00", "targets": {"UST8": "0.4", "US01": "0.4"}, "asks": [["10.00", 100]]}},
+        {"turn": "2026-11-23 00:00", "at": "2026-11-23T00:00:00", "bids": [["10.00", 10]], "sold": 0, "left": 3, "forced": true},
+        {"turn": "2026-11-23 10:00", "at": "2026-11-23T10:00:00", "bids": [["10.00", 10]], "sold": 3, "left": 0, "forced": false}
+      ],
+      "usd": "99.87"
+    },
+    "bases": {
+      "start": "2026-11-16",
+      "valuations": {"2026-11-17 00:00": 505000, "2026-11-19 00:00": 503000, "2026-11-22 00:00": 498000, "2026-11-25 00:00": 497000},
+      "steps": [
+        {"at": "2026-11-17T00:00:30", "daily": [505000, "valuation"]},
+        {"at": "2026-11-18T00:09:59", "daily": null},
+        {"at": "2026-11-18T00:10:05", "daily": [505000, "inherited"], "blocked_at": "2026-11-18T12:00:00", "blocked": ["risk_data_missing"]},
+        {"at": "2026-11-19T00:00:30", "daily": [503000, "valuation"], "blocked_at": "2026-11-19T12:00:00", "blocked": []},
+        {"at": "2026-11-22T00:00:30", "daily": [498000, "valuation"]},
+        {"at": "2026-11-23T00:10:05", "daily": [498000, "inherited"], "weekly": [500000, "inherited"], "blocked_at": "2026-11-23T12:00:00", "blocked": ["risk_data_missing"]},
+        {"at": "2026-11-25T00:00:30", "daily": [497000, "valuation"], "blocked_at": "2026-11-25T12:00:00", "blocked": ["risk_data_missing"]},
+        {"at": "2026-11-30T00:00:30", "daily": null, "blocked_at": "2026-11-30T12:00:00", "blocked": []}
+      ]
+    }
+  }
+}
