@@ -46,8 +46,8 @@ def credentials(data_dir: Path) -> tuple[str, str]:
     return token.access, token.account_id
 
 
-def ask(http: httpx.Client, access: str, account_id: str, instructions: str, text: str) -> Reply:
-    """trading-oracle src/agent/codex.py와 같은 주소·헤더·본문으로 한 번 부른다."""
+def ask(http: httpx.Client, access: str, account_id: str, instructions: str, text: str, *, model: str | None = None) -> Reply:
+    """trading-oracle src/agent/codex.py와 같은 주소·헤더·본문으로 한 번 부른다. model이 없으면 MODEL이다(v6는 자기 모델을 넘긴다)."""
     headers = {
         "Authorization": f"Bearer {access}",
         "chatgpt-account-id": account_id,
@@ -58,7 +58,7 @@ def ask(http: httpx.Client, access: str, account_id: str, instructions: str, tex
         "content-type": "application/json",
     }
     body = {
-        "model": MODEL,
+        "model": model or MODEL,
         "store": False,
         "stream": True,
         "instructions": instructions,

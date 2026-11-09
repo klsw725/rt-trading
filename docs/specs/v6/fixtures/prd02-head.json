@@ -1,0 +1,157 @@
+{
+  "token": {"access": "V6-FAKE-ACCESS-3c1d9e", "refresh": "V6-FAKE-REFRESH-8e2a71", "account_id": "V6-FAKE-ACCOUNT-a41f02"},
+  "naver": ["V6-FAKE-NAVER-ID-77", "V6-FAKE-NAVER-SECRET-91"],
+  "secrets": ["12345678-01", "V6-FAKE-NAVER-ID-77", "V6-FAKE-NAVER-SECRET-91"],
+  "input": {
+    "slot": "2026-11-17 10:40",
+    "now": "2026-11-17T10:41:00",
+    "open_at": {"KR": "regular", "US": "day"},
+    "ends_at": {"KR": "2026-11-17T15:30:00+09:00", "US": "2026-11-17T18:00:00+09:00"},
+    "state": {
+      "krw": 120000,
+      "usd": "50.25",
+      "account_no": "12345678-01",
+      "positions": {
+        "005930": {"market": "KR", "currency": "KRW", "quantity": 2, "avg_price": "180000"},
+        "NVDA": {"market": "US", "currency": "USD", "quantity": 1, "avg_price": "170.00"}
+      },
+      "last": {
+        "005930": ["185000", "2026-11-17T10:30:05+09:00"],
+        "NVDA": ["176.50", "2026-11-17T10:30:06+09:00"],
+        "USDKRW": ["1350.00", "2026-11-17T10:30:06+09:00"]
+      }
+    },
+    "bases": {"daily": 790000, "weekly": 800000},
+    "history": [810000, 805000, 798500],
+    "blocked": [],
+    "prices": ["186000", "185000", "180000", "176.5", "170.0", "1350", "999.99", "123.45", "9999", "1111.11"],
+    "prices_before": {"005930": ["186000", "2026-11-17T10:41:10+09:00"]},
+    "kr_rankings": [[[1, "005930", "-0.0111"], [2, "000660", "0.012"]], "2026-11-17T10:41:20+09:00"],
+    "infos_observed": "2026-11-17T10:41:30+09:00",
+    "infos": [
+      {"symbol": "005930", "name": "삼성전자", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:41:30+09:00"},
+      {"symbol": "000660", "name": "SK하이닉스", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:41:30+09:00"}
+    ],
+    "saved_infos": {
+      "005930": {"symbol": "005930", "name": "삼성전자", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T09:41:30+09:00"},
+      "NVDA": {"symbol": "NVDA", "name": "엔비디아", "market": "US", "security_type": "STOCK", "status": "ACTIVE", "currency": "USD", "leverage": "", "nxt_supported": 0, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T09:41:31+09:00"}
+    },
+    "after_c": [
+      {
+        "prices": {"NVDA": ["999.99", "2026-11-17T10:42:05+09:00"]},
+        "rate": ["9999.00", "2026-11-17T10:42:01+09:00"],
+        "us_rankings": [[[1, "NVDA", "-0.05"], [2, "AAPL", "0.01"]], "2026-11-17T10:42:03+09:00"],
+        "late_news": {"title": "뒤 기사 A", "originallink": "https://late.example.com/a", "link": "https://n.news.naver.com/la", "description": "늦은 요약 A", "pubDate": "Tue, 17 Nov 2026 10:43:00 +0900"}
+      },
+      {
+        "prices": {"NVDA": ["123.45", "2026-11-17T10:42:09+09:00"]},
+        "rate": ["1111.11", "2026-11-17T10:42:02+09:00"],
+        "us_rankings": [[[1, "TSLA", "0.03"]], "2026-11-17T10:42:07+09:00"],
+        "late_news": {"title": "뒤 기사 B", "originallink": "https://late.example.com/b", "link": "https://n.news.naver.com/lb", "description": "늦은 요약 B", "pubDate": "Tue, 17 Nov 2026 10:44:00 +0900"}
+      }
+    ],
+    "infos_after_c_observed": "2026-11-17T10:42:20+09:00",
+    "infos_after_c": [
+      [
+        {"symbol": "005930", "name": "삼성전자", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:42:20+09:00"},
+        {"symbol": "000660", "name": "SK하이닉스", "market": "KR", "security_type": "STOCK", "status": "ACTIVE", "currency": "KRW", "leverage": "", "nxt_supported": 1, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:42:20+09:00"}
+      ],
+      [
+        {"symbol": "005930", "name": "바뀐 이름", "market": "KR", "security_type": "STOCK", "status": "DELISTED", "currency": "KRW", "leverage": "", "nxt_supported": 0, "nxt_suspended": 0, "krx_suspended": 1, "liquidation": 1, "observed_at": "2026-11-17T10:42:20+09:00"},
+        {"symbol": "000660", "name": "다른 이름", "market": "KR", "security_type": "ETF", "status": "ACTIVE", "currency": "KRW", "leverage": "2", "nxt_supported": 0, "nxt_suspended": 0, "krx_suspended": 0, "liquidation": 0, "observed_at": "2026-11-17T10:42:20+09:00"}
+      ]
+    ],
+    "news_items": [
+      {"title": "<b>코스피</b> 상승", "originallink": "https://www.example.com/a1", "link": "https://n.news.naver.com/a1", "description": "요약 <b>1</b>", "pubDate": "Tue, 17 Nov 2026 10:30:00 +0900"},
+      {"title": "환율 &quot;안정&quot;", "originallink": "https://news.example.org/a2", "link": "https://n.news.naver.com/a2", "description": "요약 2", "pubDate": "Tue, 17 Nov 2026 10:41:00 +0900"}
+    ],
+    "decisions": [
+      {"time": "2026-11-16 23:40", "status": "ok", "positions": "[{\"symbol\": \"005930\", \"weight\": 0.3}]", "strategy": "추세", "reason": "이유 23:40", "notes": "노트 1"},
+      {"time": "2026-11-17 00:40", "status": "ok", "positions": "[{\"symbol\": \"005930\", \"weight\": 0.3}]", "strategy": "추세", "reason": "이유 00:40", "notes": "노트 2"},
+      {"time": "2026-11-17 01:40", "status": "failed", "positions": "[]", "strategy": "", "reason": "", "notes": ""},
+      {"time": "2026-11-17 02:40", "status": "ok", "positions": "[{\"symbol\": \"005930\", \"weight\": 0.3}]", "strategy": "추세", "reason": "이유 02:40", "notes": "노트 3"},
+      {"time": "2026-11-17 03:40", "status": "missing", "positions": "[]", "strategy": "", "reason": "", "notes": ""},
+      {"time": "2026-11-17 04:40", "status": "ok", "positions": "[{\"symbol\": \"005930\", \"weight\": 0.3}]", "strategy": "추세", "reason": "이유 04:40", "notes": "노트 4"},
+      {"time": "2026-11-17 05:40", "status": "late", "positions": "[]", "strategy": "", "reason": "", "notes": ""},
+      {"time": "2026-11-17 06:40", "status": "invalid", "positions": "[]", "strategy": "", "reason": "", "notes": ""},
+      {"time": "2026-11-17 07:40", "status": "ok", "positions": "[{\"symbol\": \"005930\", \"weight\": 0.3}]", "strategy": "추세", "reason": "이유 07:40", "notes": "노트 5"},
+      {"time": "2026-11-17 08:40", "status": "ok", "positions": "[{\"symbol\": \"005930\", \"weight\": 0.3}]", "strategy": "추세", "reason": "이유 08:40", "notes": "노트 6"},
+      {"time": "2026-11-17 09:40", "status": "failed", "positions": "[]", "strategy": "", "reason": "", "notes": ""},
+      {"time": "2026-11-17 11:40", "status": "ok", "positions": "[{\"symbol\": \"NVDA\", \"weight\": 0.1}]", "strategy": "미래", "reason": "미래 이유", "notes": "미래 노트"}
+    ],
+    "expected": {
+      "decision": {
+        "time": "2026-11-17T10:40+09:00",
+        "input_cutoff": "2026-11-17T10:42+09:00",
+        "fill_at": "2026-11-17T10:45+09:00",
+        "sessions": {"KR": {"name": "regular", "ends_at": "2026-11-17T15:30+09:00"}, "US": {"name": "day", "ends_at": "2026-11-17T18:00+09:00"}}
+      },
+      "account": {
+        "krw_cash_pct": 15.04,
+        "usd_cash_pct": 8.5,
+        "holdings": [
+          {"symbol": "005930", "name": "삼성전자", "market": "KR", "weight_pct": 46.61, "return_pct": 3.33, "tradable_now": true, "exit_only": false},
+          {"symbol": "NVDA", "name": "엔비디아", "market": "US", "weight_pct": 29.85, "return_pct": 3.82, "tradable_now": true, "exit_only": false}
+        ],
+        "return_since_start_pct": 59.62,
+        "today_return_pct": 1.03,
+        "week_return_pct": -0.24,
+        "max_drawdown_pct": 1.47,
+        "buy_blocked": []
+      },
+      "candidates": [
+        {"symbol": "005930", "name": "삼성전자", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": -1.11, "rank": 1, "held": true},
+        {"symbol": "000660", "name": "SK하이닉스", "market": "KR", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": 1.2, "rank": 2, "held": false},
+        {"symbol": "NVDA", "name": "엔비디아", "market": "US", "type": "STOCK", "leverage": null, "tradable_now": true, "exit_only": false, "change_pct": null, "rank": null, "held": true}
+      ],
+      "news": [
+        {"published_at": "2026-11-17T10:41:00+09:00", "source": "news.example.org", "title": "환율 \"안정\"", "summary": "요약 2"},
+        {"published_at": "2026-11-17T10:30:00+09:00", "source": "www.example.com", "title": "코스피 상승", "summary": "요약 1"}
+      ],
+      "recent_decisions": [
+        {"time": "2026-11-17 00:40", "status": "ok", "positions": [{"symbol": "005930", "weight": 0.3}], "strategy": "추세", "reason": "이유 00:40"},
+        {"time": "2026-11-17 01:40", "status": "failed", "positions": [], "strategy": "", "reason": ""},
+        {"time": "2026-11-17 02:40", "status": "ok", "positions": [{"symbol": "005930", "weight": 0.3}], "strategy": "추세", "reason": "이유 02:40"},
+        {"time": "2026-11-17 03:40", "status": "missing", "positions": [], "strategy": "", "reason": ""},
+        {"time": "2026-11-17 04:40", "status": "ok", "positions": [{"symbol": "005930", "weight": 0.3}], "strategy": "추세", "reason": "이유 04:40"},
+        {"time": "2026-11-17 05:40", "status": "late", "positions": [], "strategy": "", "reason": ""},
+        {"time": "2026-11-17 06:40", "status": "invalid", "positions": [], "strategy": "", "reason": ""},
+        {"time": "2026-11-17 07:40", "status": "ok", "positions": [{"symbol": "005930", "weight": 0.3}], "strategy": "추세", "reason": "이유 07:40"},
+        {"time": "2026-11-17 08:40", "status": "ok", "positions": [{"symbol": "005930", "weight": 0.3}], "strategy": "추세", "reason": "이유 08:40"},
+        {"time": "2026-11-17 09:40", "status": "failed", "positions": [], "strategy": "", "reason": ""}
+      ],
+      "notes": "노트 6",
+      "limits": {"max_positions": 5, "max_weight": 0.4, "max_total_weight": 1, "loss_limits_pct": {"daily": -2, "weekly": -5, "cumulative": -20}}
+    }
+  },
+  "response": {
+    "slot": "2026-11-17 10:40",
+    "start": "2026-11-17T10:41:30",
+    "candidates": [
+      {"symbol": "005930", "exit_only": false},
+      {"symbol": "000660", "exit_only": false},
+      {"symbol": "NVDA", "exit_only": false},
+      {"symbol": "QQQ", "exit_only": false},
+      {"symbol": "SPY", "exit_only": false},
+      {"symbol": "MSFT", "exit_only": false},
+      {"symbol": "122630", "exit_only": true}
+    ],
+    "valid": "{\"positions\": [{\"symbol\": \"005930\", \"weight\": 0.4}, {\"symbol\": \"NVDA\", \"weight\": 0.3}], \"strategy\": \"추세\", \"reason\": \"이유\", \"notes\": \"노트\"}",
+    "invalid": {
+      "목록 밖 종목": "{\"positions\": [{\"symbol\": \"TSLA\", \"weight\": 0.2}], \"strategy\": \"s\", \"reason\": \"r\", \"notes\": \"n\"}",
+      "exit_only 종목": "{\"positions\": [{\"symbol\": \"122630\", \"weight\": 0.2}], \"strategy\": \"s\", \"reason\": \"r\", \"notes\": \"n\"}",
+      "6종목": "{\"positions\": [{\"symbol\": \"005930\", \"weight\": 0.1}, {\"symbol\": \"000660\", \"weight\": 0.1}, {\"symbol\": \"NVDA\", \"weight\": 0.1}, {\"symbol\": \"QQQ\", \"weight\": 0.1}, {\"symbol\": \"SPY\", \"weight\": 0.1}, {\"symbol\": \"MSFT\", \"weight\": 0.1}], \"strategy\": \"s\", \"reason\": \"r\", \"notes\": \"n\"}",
+      "비중 0.41": "{\"positions\": [{\"symbol\": \"005930\", \"weight\": 0.41}], \"strategy\": \"s\", \"reason\": \"r\", \"notes\": \"n\"}",
+      "비중 합 1.01": "{\"positions\": [{\"symbol\": \"005930\", \"weight\": 0.4}, {\"symbol\": \"NVDA\", \"weight\": 0.4}, {\"symbol\": \"QQQ\", \"weight\": 0.21}], \"strategy\": \"s\", \"reason\": \"r\", \"notes\": \"n\"}",
+      "겹친 종목": "{\"positions\": [{\"symbol\": \"005930\", \"weight\": 0.2}, {\"symbol\": \"005930\", \"weight\": 0.2}], \"strategy\": \"s\", \"reason\": \"r\", \"notes\": \"n\"}"
+    },
+    "runs": {
+      "ok": {"attempts": [["ok", 5, "valid"]], "status": "ok", "requests": 1, "targets": {"005930": "0.4", "NVDA": "0.3"}},
+      "E 뒤 응답": {"attempts": [["ok", 240, "valid"]], "status": "late", "requests": 1, "targets": null},
+      "E 전 응답, E에 끝난 검증": {"attempts": [["ok", 200, "valid"]], "parse_seconds": 10, "status": "late", "requests": 1, "targets": null},
+      "첫 호출 실패 뒤 한 번": {"attempts": [["http", 5], ["ok", 5, "valid"]], "status": "ok", "requests": 2, "targets": {"005930": "0.4", "NVDA": "0.3"}},
+      "두 번 모두 호출 오류": {"attempts": [["http", 5], ["network", 5]], "status": "failed", "requests": 2, "targets": null},
+      "두 번 모두 형식 오류": {"attempts": [["ok", 5, "비중 0.41"], ["ok", 5, "비중 0.41"]], "status": "invalid", "requests": 2, "targets": null}
+    }
+  }
+}
