@@ -17,7 +17,7 @@ from unittest import mock
 
 import httpx
 
-from rt_trading import codex, toss, v4_news, v6_head, v6_market, v6_paper, v6_run
+from rt_trading import cli, codex, toss, v3_serve, v4_news, v6_head, v6_market, v6_paper, v6_run, v6_serve
 from rt_trading.toss import KST
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -829,6 +829,131 @@ def case_run_strategies() -> None:
     assert content["account"]["equity"] == final, content["account"]
 
 
+# PRD 05 서버 실행 환경
+
+
+def case_serve_token() -> None:
+    fixture = _fixture("prd05-serve.json")["token"]
+    sessions = _fixture("prd01-market.json")["sessions"] | {"holidays": {"KR": [], "US": []}, "overrides": {"KR": {}, "US": {}}}
+    issued, headers, lock = [], [], threading.Lock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/token":
+            with lock:
+                issued.append(request.url.path)
+            time.sleep(0.2)  # 두 쪽이 함께 만료를 볼 때 앞쪽이 잠금을 쥐고 있게 한다
+            return httpx.Response(200, json={"access_token": fixture["issued"], "token_type": "Bearer", "expires_in": 86400})
+        with lock:
+            headers.append(request.headers.get("authorization"))
+        if request.url.path == "/api/v1/accounts":
+            return httpx.Response(200, json={"result": []})
+        market, asked = request.url.path.rsplit("/", 1)[1], request.url.params["date"]
+        days = fixture["calendar_days"][market]
+        return httpx.Response(200, json=_calendar_body(sessions, market, dict(zip(("previousBusinessDay", "today", "nextBusinessDay"), days[asked]))))
+
+    class Fixed(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return _time(fixture["now"]).astimezone(tz)
+
+    with tempfile.TemporaryDirectory() as name:
+        root = Path(name)
+        (root / ".env").write_text(f"TOSS_INVEST_CLIENT_ID={fixture['client_id']}\nTOSS_INVEST_CLIENT_SECRET={fixture['client_secret']}\n", encoding="utf-8")
+        token_path = root / "data" / "toss" / "token.json"
+        token_path.parent.mkdir(parents=True)
+        token_path.write_text(json.dumps({"access_token": fixture["expired"], "expires_at": (datetime.now(KST) - timedelta(hours=1)).isoformat()}), encoding="utf-8")
+        paths = v6_run.Paths(root / "data" / "v6", root / "data" / "reports")
+        paths.root.mkdir(parents=True)
+        paths.config.write_text(json.dumps({"start": fixture["start"]}), encoding="utf-8")
+        v6_market.save_calendar(paths.calendar, _standard_calendar(_fixture("prd04-run.json")["calendar"]))
+        original = httpx.Client
+        codes, ready = [], threading.Barrier(2)
+
+        def v6_side() -> None:
+            ready.wait()
+            codes.append(cli.run_v6("v6-watch", None))
+
+        def v5_side() -> None:
+            with original(base_url=toss.BASE_URL, transport=httpx.MockTransport(handler)) as http:
+                token = toss.SharedToken(http, toss.read_credentials(root), token_path)
+                ready.wait()
+                toss._send(http, "GET", "/api/v1/accounts", token)
+
+        with (
+            mock.patch.object(cli, "ROOT", root),
+            mock.patch.object(cli, "V6_PATHS", paths),
+            mock.patch.object(cli, "datetime", Fixed),
+            mock.patch.object(httpx, "Client", lambda **kwargs: original(transport=httpx.MockTransport(handler), **kwargs)),
+            mock.patch.object(toss, "_sleep", lambda seconds: None),
+        ):
+            workers = [threading.Thread(target=v6_side), threading.Thread(target=v5_side)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+        stored = json.loads(token_path.read_text(encoding="utf-8"))["access_token"]
+    assert codes == [0], codes
+    assert len(issued) == 1, f"토큰을 {len(issued)}번 받았다"
+    assert headers and set(headers) == {f"Bearer {fixture['issued']}"} and stored == fixture["issued"], (set(headers), stored)
+
+
+def _files(root: Path) -> dict[str, tuple]:
+    """저장된 파일마다 (크기, 바꾼 시각, 내용)."""
+    return {str(path.relative_to(root)): (path.stat().st_size, path.stat().st_mtime_ns, path.read_bytes()) for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+def case_serve_page() -> None:
+    fixture = _fixture("prd05-serve.json")["page"]
+    run_fixture = _fixture("prd04-run.json")
+    now = _time(fixture["now"])
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths, clock = _run_paths(tmp, run_fixture), Clock(now)
+        with _run_http(run_fixture, {}, clock, [], tmp) as (http, token, _, _):
+            v6_run.prepare(paths, http, token, clock, [])
+        infos = _paper_infos(fixture["instruments"])
+        with v6_run.ledger(paths) as conn:
+            v6_paper.save_instruments(conn, infos)
+            conn.execute("UPDATE cash SET amount = ? WHERE currency = 'KRW'", (fixture["krw"],))
+            conn.execute("UPDATE cash SET amount = ? WHERE currency = 'USD'", (fixture["usd"],))
+            for symbol, (quantity, average, price) in fixture["positions"].items():
+                conn.execute("INSERT INTO positions VALUES (?, ?, ?, ?, ?)", (symbol, infos[symbol]["market"], infos[symbol]["currency"], quantity, average))
+                conn.execute("INSERT INTO last_values VALUES (?, ?, ?)", (symbol, price, fixture["now"] + "+09:00"))
+            used = {symbol: (Decimal(price), now, True) for symbol, (_, _, price) in fixture["positions"].items()} | {"USDKRW": (Decimal("1350.00"), now, False)}
+            v6_paper.record_valuation(conn, fixture["slot"], "watch", now, fixture["equity"], v6_paper.state(conn), used, ["UST1"])
+            for row in fixture["decisions"]:
+                v6_head.record(conn, paths.head, {column: "" for column in v6_head.COLUMNS} | {"attempts": 1, "positions": "[]"} | row, None)
+                if row["status"] == "ok":  # 실제 실행처럼 ok 판단에는 그 차례 C 평가가 있다
+                    v6_paper.record_valuation(conn, v6_head.times(row["time"])[1].strftime("%Y-%m-%d %H:%M"), "c", now, fixture["equity"], v6_paper.state(conn), {}, [])
+            conn.execute("INSERT INTO limits VALUES ('daily', ?, ?, 490000)", (fixture["now"][:10], fixture["now"] + "+09:00"))
+            conn.execute("INSERT INTO events VALUES (?, 'forced_start', 'daily')", (fixture["now"] + "+09:00",))
+            fill = dict.fromkeys(v6_paper.FILL_COLUMNS, "0") | fixture["fill"]
+            conn.execute(f"INSERT INTO fills ({', '.join(v6_paper.FILL_COLUMNS)}) VALUES ({', '.join('?' * len(v6_paper.FILL_COLUMNS))})", [fill[column] for column in v6_paper.FILL_COLUMNS])
+        (paths.root / "run.log").write_text("".join(f"줄 {number:02d}\n" for number in range(1, 51)), encoding="utf-8")
+        (paths.root.parent / "toss").mkdir(exist_ok=True)
+        (paths.root.parent / "toss" / "token.json").write_text(json.dumps({"access_token": fixture["token"]}), encoding="utf-8")
+        (tmp / ".env").write_text(f"TOSS_INVEST_CLIENT_SECRET={fixture['secret']}\n", encoding="utf-8")
+        status = {"started_at": fixture["now"], "running": None, "last": {"job": "watch " + fixture["slot"], "started_at": fixture["now"], "finished_at": fixture["now"], "exit": 0}}
+        before = _files(tmp)
+        httpd = v3_serve.server("127.0.0.1", 0, lambda: v6_serve.page(paths, status, now))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            with httpx.Client(trust_env=False) as client:
+                response = client.get(f"{base}/")
+                assert response.status_code == 200 and response.headers["content-type"].startswith("text/html"), response
+                assert client.get(f"{base}/other").status_code == 404 and client.post(f"{base}/").status_code == 501
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+        assert _files(tmp) == before, "페이지를 열었더니 저장된 파일이 바뀌었다"
+    text = response.text
+    for item in fixture["present"]:
+        assert item in text, (item, text)
+    for item in [fixture["token"], fixture["secret"], *fixture["absent"]]:
+        assert item not in text, (item, text)
+
+
 CASES = {
     "01": [
         (
@@ -885,6 +1010,10 @@ CASES = {
         ),
         ("stale: 거래할 수 있는 보유의 현재가·필요한 환율을 마지막으로 받은 지 20분이 넘으면 stale, 20분 안에 받았으면 응답 시각이 오래돼도 아님, 거래할 수 없는 보유는 아님", case_run_stale),
         ("전략 이름별 pnl_krw ÷ 500,000의 합이 총수익률과 같음", case_run_strategies),
+    ],
+    "05": [
+        ("v6의 토스 호출(v6-watch 명령 경로)이 v5와 같은 토큰 파일을 쓰고, 두 프로세스가 함께 만료를 보면 토큰을 한 번만 받음", case_serve_token),
+        ("현황 웹페이지: GET 요청에만 답하고(다른 경로 404, POST 501), 판단 이유 속 HTML은 글자 그대로, 페이지를 열어도 파일이 바뀌지 않음, 인증 정보와 토큰이 보이지 않음", case_serve_page),
     ],
 }
 

@@ -141,6 +141,21 @@ def _filler(paths: Paths, http: httpx.Client, token: toss.SharedToken, clock: Ca
     return fill
 
 
+def refresh_calendar(paths: Paths, http: httpx.Client, token: toss.SharedToken, clock: Callable[[], datetime]) -> None:
+    """v6-serve가 켜질 때 국내·미국 장 운영 정보를 오늘 날짜로 한 번씩 받아 합친다. 받지 못한 것은 기록만 한다."""
+    events: list[dict] = []
+    fill = _filler(paths, http, token, clock, events, v6_market.load_calendar(paths.calendar))
+    today = clock().astimezone(KST).date().isoformat()
+    try:
+        for market in ("KR", "US"):
+            try:
+                fill(today, market)
+            except v6_market.V6Error as error:
+                print(error)
+    finally:
+        _save_events(paths, events)
+
+
 def _today_calendar(paths: Paths, http: httpx.Client, token: toss.SharedToken, clock: Callable[[], datetime], events: list[dict], calendar: dict) -> None:
     """그날 장 운영 정보를 아직 받지 않았으면 국내·미국을 오늘 날짜로 한 번씩 받는다. 받지 못하면 저장한 값을 쓴다."""
     today = clock().astimezone(KST).date().isoformat()

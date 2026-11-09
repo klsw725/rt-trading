@@ -36,9 +36,9 @@ from rt_trading import (
     v5_report,
     v5_serve,
     v5_target,
-    v6_acceptance,
     v6_market,
     v6_run,
+    v6_serve,
     web_acceptance,
 )
 
@@ -64,7 +64,7 @@ SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
 
 
 def main() -> None:
-    from rt_trading import acceptance, v5_acceptance  # 두 acceptance가 이 모듈을 쓰므로 여기서 불러온다
+    from rt_trading import acceptance, v5_acceptance, v6_acceptance  # 세 acceptance가 이 모듈을 쓰므로 여기서 불러온다
 
     parser = argparse.ArgumentParser(prog="rt-trading")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -114,6 +114,8 @@ def main() -> None:
     v6_decide.add_argument("--at", required=True, help="판단 차례 HH:40")
     commands.add_parser("v6-watch", help="v6 10분 평가, 손실 한도와 강제 매도 한 번")
     commands.add_parser("v6-report", help="v6 보고서와, 검증 구간이 끝났으면 판정")
+    v6_serve_args = commands.add_parser("v6-serve", help="v6 10분 평가·매시 판단·매일 보고서 자동 실행과 보기 전용 현황 웹페이지(서버의 Docker 컨테이너에서 쓴다)")
+    v6_serve_args.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -153,6 +155,8 @@ def main() -> None:
         sys.exit(v6_acceptance.run(args.prd))
     if args.command in ("v6-decide", "v6-watch", "v6-report"):
         sys.exit(run_v6(args.command, getattr(args, "at", None)))
+    if args.command == "v6-serve":
+        sys.exit(v6_serve.run(V6_PATHS, args.host, v6_serve.PORT, refresh_v6_calendar))
     if args.command == "v5-daily":
         sys.exit(run_v5_daily())
     if args.command == "v5-decide":
@@ -194,6 +198,15 @@ def run_v6(command: str, at: str | None) -> int:
             return v6_run.watch(V6_PATHS, http, token, clock, time.sleep)
         credentials = lambda: codex.credentials(codex.TOKEN_DIR)
         return v6_run.decide(V6_PATHS, at, http, token, v4_news.read_credentials(ROOT), credentials, clock, time.sleep)
+
+
+def refresh_v6_calendar() -> None:
+    """v6-serve가 켜질 때 장 운영 정보를 받는다. 인증 정보가 없으면 기록만 하고 계속한다."""
+    try:
+        with httpx.Client(base_url=toss.BASE_URL, timeout=v6_market.TIMEOUT) as http:
+            v6_run.refresh_calendar(V6_PATHS, http, shared_token(http), lambda: datetime.now(toss.KST))
+    except KeyError as error:
+        print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
 
 
 def shared_token(http: httpx.Client) -> toss.SharedToken:

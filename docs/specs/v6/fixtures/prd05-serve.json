@@ -1,0 +1,36 @@
+{
+  "token": {
+    "now": "2026-11-17T10:40:05",
+    "start": "2026-11-16",
+    "client_id": "V6-SERVE-ID-55",
+    "client_secret": "V6-SERVE-SECRET-66",
+    "expired": "V6-OLD-TOKEN-77",
+    "issued": "V6-NEW-TOKEN-88",
+    "calendar_days": {
+      "KR": {"2026-11-17": ["2026-11-16", "2026-11-17", "2026-11-18"]},
+      "US": {"2026-11-16": ["2026-11-13", "2026-11-16", "2026-11-17"]}
+    }
+  },
+  "page": {
+    "now": "2026-11-17T10:46:00",
+    "slot": "2026-11-17 10:40",
+    "instruments": [["100001", "KR", "STOCK", "", 1], ["UST1", "US", "STOCK", "", 0]],
+    "krw": "300000",
+    "usd": "12.34",
+    "positions": {"100001": [10, "10000", "10100"], "UST1": [2, "20.00", "21.00"]},
+    "equity": 474359,
+    "decisions": [
+      {"time": "2026-11-17 09:40", "status": "ok", "positions": "[{\"symbol\": \"100001\", \"weight\": 0.2}]", "strategy": "추세", "reason": "이유 <script>alert(1)</script>"},
+      {"time": "2026-11-17 10:40", "status": "failed", "error": "V3_CODEX_HTTP_ERROR"}
+    ],
+    "fill": {
+      "at": "2026-11-17T09:45:00+09:00", "origin": "decision", "turn": "2026-11-17 09:40", "symbol": "100001", "market": "KR", "session": "regular",
+      "side": "BUY", "quantity": 10, "levels": "[[\"10000\", 10]]", "amount": "100000", "currency": "KRW", "commission": "15", "fx_rate": "", "fx_cost_rate": "",
+      "eligible": 1, "tradable": 1, "blocked": 0, "krw_after": "399985", "usd_after": "12.34", "holdings_after": 2
+    },
+    "token": "V6-PAGE-TOKEN-99",
+    "secret": "V6-PAGE-SECRET-00",
+    "present": ["&lt;script&gt;alert(1)&lt;/script&gt;"],
+    "absent": ["<script>alert(1)</script>"]
+  }
+}
