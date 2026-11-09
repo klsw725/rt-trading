@@ -5,6 +5,9 @@ import io
 import json
 import sqlite3
 import tempfile
+import threading
+import time
+from collections.abc import Callable
 from contextlib import closing
 from datetime import date as Date
 from datetime import datetime, timedelta
@@ -14,7 +17,7 @@ from unittest import mock
 
 import httpx
 
-from rt_trading import codex, toss, v4_news, v6_head, v6_market, v6_paper
+from rt_trading import codex, toss, v4_news, v6_head, v6_market, v6_paper, v6_run
 from rt_trading.toss import KST
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -476,6 +479,356 @@ def case_paper_limits() -> None:
                 assert v6_paper.blocked_reasons(conn, _time(step["blocked_at"])) == step["blocked"], (step, v6_paper.blocked_reasons(conn, _time(step["blocked_at"])))
 
 
+# PRD 04 실행과 보고
+
+
+def _stocks_body(rows: list[list]) -> dict:
+    keys = ("liquidationTrading", "nxtSupported", "krxTradingSuspended", "nxtTradingSuspended")
+    return {
+        "result": [
+            {"symbol": symbol, "name": name, "market": market, "securityType": kind, "status": status, "currency": currency, "leverageFactor": leverage,
+             "koreanMarketDetail": None if detail is None else dict(zip(keys, detail))}
+            for symbol, name, market, kind, status, currency, leverage, detail in rows
+        ]
+    }
+
+
+def _run_paths(tmp: Path, fixture: dict) -> v6_run.Paths:
+    """임시 data/v6에 시작일 설정과 표준 장 운영 정보를 둔다."""
+    paths = v6_run.Paths(tmp / "data" / "v6", tmp / "data" / "reports")
+    paths.root.mkdir(parents=True)
+    paths.config.write_text(json.dumps({"start": fixture["start"]}), encoding="utf-8")
+    v6_market.save_calendar(paths.calendar, _standard_calendar(fixture["calendar"]))
+    return paths
+
+
+@contextlib.contextmanager
+def _run_http(fixture: dict, routes: dict, clock: Clock, attempts: list[list], tmp: Path):
+    """토스·Codex·네이버 가짜를 주소로 나눠 쓰는 http와 함께 쓰는 토큰, Codex 인증 함수, (가짜 토스, 가짜 Codex)."""
+    toss_fake, codex_fake = FakeToss(routes, clock), FakeCodex(clock, attempts)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "chatgpt.com":
+            return codex_fake(request)
+        if "naver" in request.url.host:
+            return httpx.Response(200, json={"items": []})
+        return toss_fake(request)
+
+    token_dir = tmp / "codex"
+    (token_dir / "auth").mkdir(parents=True, exist_ok=True)
+    (token_dir / "auth" / "codex.json").write_text(json.dumps(fixture["run"]["codex_token"] | {"expires": FAR_FUTURE_MS}), encoding="utf-8")
+    token_path = tmp / "toss" / "token.json"
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(json.dumps({"access_token": "v6-run-token", "expires_at": (clock() + timedelta(days=30)).isoformat()}), encoding="utf-8")
+    with mock.patch.object(toss, "_sleep", lambda seconds: None), httpx.Client(base_url=toss.BASE_URL, transport=httpx.MockTransport(handler)) as http:
+        yield http, toss.SharedToken(http, ("id", "secret"), token_path, clock), lambda: codex.credentials(token_dir), (toss_fake, codex_fake)
+
+
+def _run_routes(fixture: dict) -> dict:
+    run = fixture["run"]
+    routes = {
+        "/api/v1/exchange-rate": [{"body": {"result": run["rate"]}}],
+        "/api/v1/stocks": [{"body": _stocks_body(run["stocks"])}],
+        "/api/v1/orderbook?symbol=100001": [{"body": {"result": run["book"]}}],
+        "/api/v1/orderbook?symbol=100002": [{"status": 404, "body": {"error": {"code": "not-found"}}}],
+    }
+    for market, items in run["rankings"].items():
+        routes[f"/api/v1/rankings?marketCountry={market}"] = [
+            {"body": {"result": {"rankedAt": "2026-11-17T10:40:00+09:00", "rankings": [{"rank": rank, "symbol": symbol, "price": {"changeRate": rate}} for rank, symbol, rate in items]}}}
+        ]
+    return routes
+
+
+def _prepare_run(paths: v6_run.Paths, http: httpx.Client, token: toss.SharedToken, clock: Clock, midnight_equity: int = 500000) -> None:
+    """장부를 만들고 그날 00:00 평가를 넣어 하루 기준이 평가에서 오게 한다."""
+    v6_run.prepare(paths, http, token, clock, [])
+    with v6_run.ledger(paths) as conn:
+        v6_paper.record_valuation(conn, "2026-11-17 00:00", "watch", _time("2026-11-17T00:00:05"), midnight_equity, v6_paper.state(conn), {}, [])
+
+
+def case_run_decide() -> None:
+    fixture = _fixture("prd04-run.json")
+    run = fixture["run"]
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths, clock = _run_paths(tmp, fixture), Clock(_time("2026-11-17T10:40:05"))
+        with _run_http(fixture, _run_routes(fixture), clock, [["ok", 5, run["reply"]]], tmp) as (http, token, credentials, (_, codex_fake)):
+            _prepare_run(paths, http, token, clock)
+            assert v6_run.decide(paths, "10:40", http, token, ("id", "secret"), credentials, clock, clock.advance) == 0
+            clock.now = _time("2026-11-17T10:45:10")  # 호가를 아직 받을 수 있는 E + 40초 안에 다시 실행한다
+            assert v6_run.decide(paths, "10:40", http, token, ("id", "secret"), credentials, clock, clock.advance) == 0
+            clock.now = _time("2026-11-17T11:46:00")
+            assert v6_run.decide(paths, "11:40", http, token, ("id", "secret"), credentials, clock, clock.advance) == 0
+            assert len(codex_fake.requests) == 1, "같은 차례를 두 번 실행했거나 E가 지난 차례에 Codex를 불렀다"
+        with closing(sqlite3.connect(paths.paper)) as conn:
+            decisions = dict(conn.execute("SELECT time, status || ':' || error FROM decisions"))
+            fills = [dict(zip(v6_paper.FILL_COLUMNS, row)) for row in conn.execute(f"SELECT {', '.join(v6_paper.FILL_COLUMNS)} FROM fills")]
+            kinds = [row for row in conn.execute("SELECT slot, kind FROM valuations WHERE slot >= '2026-11-17 10' ORDER BY slot")]
+        assert decisions == {"2026-11-17 10:40": "ok:", "2026-11-17 11:40": "missing:V6_STARTED_LATE"}, decisions
+        assert len(fills) == 1 and all(_same_value(fills[0][key], value) for key, value in run["expected_fill"].items()), fills
+        assert kinds == [("2026-11-17 10:40", "watch"), ("2026-11-17 10:42", "c")], kinds
+        assert (paths.head / "2026-11-17" / "1040" / "orderbook.json").exists()
+    with tempfile.TemporaryDirectory() as name:  # 같은 차례를 두 프로세스가 함께 실행해도 판단·C 평가·체결이 하나씩이다
+        tmp = Path(name)
+        paths, clock = _run_paths(tmp, fixture), Clock(_time("2026-11-17T10:40:05"))
+        with _run_http(fixture, _run_routes(fixture), clock, [["ok", 5, run["reply"]]], tmp) as (http, token, credentials, (_, codex_fake)):
+            _prepare_run(paths, http, token, clock)
+            errors = []
+
+            def both() -> None:
+                try:
+                    v6_run.decide(paths, "10:40", http, token, ("id", "secret"), credentials, clock, clock.advance)
+                except Exception as error:
+                    errors.append(repr(error))
+
+            workers = [threading.Thread(target=both) for _ in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join()
+        with closing(sqlite3.connect(paths.paper)) as conn:
+            counts = [conn.execute(query).fetchone()[0] for query in ("SELECT COUNT(*) FROM decisions", "SELECT COUNT(*) FROM valuations WHERE kind = 'c'", "SELECT COUNT(*) FROM fills")]
+        assert not errors and counts == [1, 1, 1] and len(codex_fake.requests) == 1, (errors, counts, len(codex_fake.requests))
+
+
+def case_run_limit_first() -> None:
+    fixture = _fixture("prd04-run.json")
+    run, limit = fixture["run"], fixture["run"]["limit"]
+    routes = _run_routes(fixture) | {"/api/v1/prices": [{"body": {"result": [{"symbol": "100002", "lastPrice": limit["price"], "currency": "KRW"}]}}]}
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths, clock = _run_paths(tmp, fixture), Clock(_time("2026-11-17T10:40:05"))
+        with _run_http(fixture, routes, clock, [["ok", 5, run["reply"]]], tmp) as (http, token, credentials, _):
+            _prepare_run(paths, http, token, clock)
+            with v6_run.ledger(paths) as conn:
+                v6_paper.save_instruments(conn, v6_market.fetch_instruments(http, token, ["100002"], clock() + timedelta(minutes=1), clock, []))
+                conn.execute("UPDATE cash SET amount = '0' WHERE currency = 'KRW'")
+                conn.execute("INSERT INTO positions VALUES ('100002', 'KR', 'KRW', ?, ?)", (limit["quantity"], limit["average"]))
+                conn.execute("INSERT INTO last_values VALUES ('100002', ?, '2026-11-17T10:30:00+09:00')", (limit["average"],))
+            assert v6_run.decide(paths, "10:40", http, token, ("id", "secret"), credentials, clock, clock.advance) == 0
+        with closing(sqlite3.connect(paths.paper)) as conn:
+            buys = conn.execute("SELECT COUNT(*) FROM fills WHERE side = 'BUY'").fetchone()[0]
+            watch_at, c_at = (conn.execute("SELECT at FROM valuations WHERE slot = ?", (slot,)).fetchone()[0] for slot in ("2026-11-17 10:40", "2026-11-17 10:42"))
+        blocked = json.loads((paths.head / "2026-11-17" / "1040" / "input.json").read_text(encoding="utf-8"))["input"]["account"]["buy_blocked"]
+        assert buys == 0 and watch_at <= c_at and blocked == limit["reasons"], (buys, watch_at, c_at, blocked)
+
+
+def case_run_serialized() -> None:
+    fixture = _fixture("prd04-run.json")
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths, clock = _run_paths(tmp, fixture), Clock(_time("2026-11-17T10:46:00"))
+        routes = _run_routes(fixture) | {"/api/v1/prices": [{"body": {"result": []}}]}
+        with _run_http(fixture, routes, clock, [], tmp) as (http, token, _, _):
+            _prepare_run(paths, http, token, clock)
+            with v6_run.ledger(paths) as conn:
+                v6_paper.save_instruments(conn, v6_market.fetch_instruments(http, token, ["100001", "100002"], clock() + timedelta(minutes=1), clock, []))
+                conn.execute("INSERT INTO positions VALUES ('100002', 'KR', 'KRW', 1, '5000')")
+                conn.execute("INSERT INTO last_values VALUES ('100002', '5000', '2026-11-17T10:46:00+09:00')")
+                conn.execute("INSERT INTO events VALUES ('2026-11-17T10:30:00+09:00', 'forced_start', 'daily')")
+                v6_paper.record_valuation(conn, "2026-11-17 10:42", "c", clock(), 500000, v6_paper.state(conn), {}, [])
+            spans, calendar = [], v6_market.load_calendar(paths.calendar)
+
+            def slow(original):
+                def wrapped(*args, **kwargs):
+                    begun = time.monotonic()
+                    time.sleep(0.3)
+                    original(*args, **kwargs)
+                    spans.append((begun, time.monotonic()))
+
+                return wrapped
+
+            with mock.patch.object(v6_paper, "rebalance", slow(v6_paper.rebalance)), mock.patch.object(v6_paper, "force", slow(v6_paper.force)):
+                workers = [
+                    threading.Thread(target=v6_run._fill, args=(paths, http, token, clock, lambda seconds: None, [], calendar, "2026-11-17 10:40", {"100001": Decimal("0.1")})),
+                    threading.Thread(target=v6_run._watch, args=(paths, http, token, clock, lambda seconds: None, [], calendar, _time("2026-11-16T00:00:00"), _time("2026-12-01T00:00:00"), _time("2026-11-17T10:50:00"))),
+                ]
+                for worker in workers:
+                    worker.start()
+                for worker in workers:
+                    worker.join()
+        assert len(spans) == 2, spans
+        (first_start, first_end), (second_start, _) = sorted(spans)
+        assert first_end <= second_start, "강제 매도와 판단 체결이 장부를 동시에 바꿨다"
+
+
+def case_run_rate_limit() -> None:
+    clock = Clock(_time("2026-11-17T10:40:05"))
+    limited = {"status": 429, "headers": {"Retry-After": "2"}, "body": {"error": {"code": "rate-limit-exceeded"}}}
+    for responses, ok in (([limited, limited, {"body": {"result": []}}], False), ([limited, {"body": {"result": []}}], True)):
+        with _toss({"/api/v1/prices": list(responses)}, clock) as (http, token, fake):
+            try:
+                v6_market.request(http, token, "/api/v1/prices", {"symbols": "100001"}, clock() + timedelta(minutes=1), clock, [])
+                got = True
+            except v6_market.V6Error:
+                got = False
+            assert (got, len(fake.requests)) == (ok, 2), (ok, got, len(fake.requests))
+
+
+def _period_record(paths: v6_run.Paths, fixture: dict, change: Callable[[dict], None] | None = None) -> None:
+    """시작일부터 끝 시각까지 모든 판단 ok, 모든 10분 평가 500,000원, 정상 체결 몇 개인 장부를 만들고 change로 바꿀 곳만 바꾼다."""
+    verdict, calendar = fixture["verdict"], v6_market.load_calendar(paths.calendar)
+    names = fixture["verdict"]["strategies"]["names"]
+    record = {"decisions": {}, "c": {}, "watch": {}, "fills": [], "calendar": calendar}
+    day = Date.fromisoformat(fixture["start"])
+    end = datetime.fromisoformat(fixture["end"])
+    index = 0
+    while day < end.date():
+        for clock_text, _ in v6_market.slots(calendar, day.isoformat()):
+            slot = f"{day} {clock_text}"
+            record["decisions"][slot] = {"status": "ok", "strategy": names[index % 2]}
+            record["c"][v6_head.times(slot)[1].strftime("%Y-%m-%d %H:%M")] = 500000 + verdict["strategies"]["step"] * index
+            index += 1
+        day += timedelta(days=1)
+    moment = _time(f"{fixture['start']}T00:00:00")
+    while moment <= end:
+        record["watch"][moment.strftime("%Y-%m-%d %H:%M")] = [500000, 0]
+        moment += timedelta(minutes=10)
+    record["watch"][verdict["after_end_slot"]] = [500000, 0]
+    for item in verdict["fills"]:
+        record["fills"].append(
+            {
+                "at": item["at"], "origin": "decision", "turn": item["turn"], "symbol": "100001", "market": "KR", "session": "regular", "side": "BUY",
+                "quantity": 1, "levels": "[]", "amount": "10000", "currency": "KRW", "commission": "1", "tax": "0", "risk_cost": "0", "sec_fee": "0",
+                "fx_usd": "0", "fx_krw": "0", "fx_rate": "", "fx_cost_rate": "", "realized": "0", "eligible": 1, "tradable": 1, "blocked": 0,
+                "krw_after": "489999", "usd_after": "0", "holdings_after": 1,
+            }
+        )
+    if change:
+        change(record)
+    v6_market.save_calendar(paths.calendar, record["calendar"])
+    with v6_run.ledger(paths) as conn:
+        v6_paper.start(conn, fixture["start"])
+        conn.executemany("INSERT INTO meta VALUES (?, ?)", [("start", fixture["start"]), ("end", fixture["end"])])
+        for slot, item in record["decisions"].items():
+            row = {column: "" for column in v6_head.COLUMNS} | {"time": slot, "positions": "[]", "attempts": 1} | item
+            conn.execute(f"INSERT INTO decisions VALUES ({', '.join('?' * len(v6_head.COLUMNS))})", [row[column] for column in v6_head.COLUMNS])
+        conn.executemany("INSERT INTO valuations VALUES (?, 'c', ?, ?, '0', '0', '', '{}', 0, '')", [(slot, slot, equity) for slot, equity in record["c"].items()])
+        conn.executemany("INSERT INTO valuations VALUES (?, 'watch', ?, ?, '0', '0', '', '{}', ?, '')", [(slot, slot, equity, stale) for slot, (equity, stale) in record["watch"].items()])
+        for fill in record["fills"]:
+            conn.execute(f"INSERT INTO fills ({', '.join(v6_paper.FILL_COLUMNS)}) VALUES ({', '.join('?' * len(v6_paper.FILL_COLUMNS))})", [fill[column] for column in v6_paper.FILL_COLUMNS])
+
+
+def _report(fixture: dict, change: Callable[[dict], None] | None = None, now: str | None = None) -> tuple[dict, dict]:
+    with tempfile.TemporaryDirectory() as name:
+        paths = _run_paths(Path(name), fixture)
+        _period_record(paths, fixture, change)
+        return v6_run.build(paths, _time(now or fixture["verdict"]["now_after"]))
+
+
+def case_run_period() -> None:
+    fixture = _fixture("prd04-run.json")
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths, clock = _run_paths(tmp, fixture), Clock(_time("2026-11-16T09:00:00"))
+        with _run_http(fixture, {}, clock, [], tmp) as (http, token, _, _):
+            start, end, _ = v6_run.prepare(paths, http, token, clock, [])
+            assert end == datetime.fromisoformat(fixture["end"]), end
+            with v6_run.ledger(paths) as conn:
+                conn.execute("INSERT OR REPLACE INTO meta VALUES ('calendar_day', '2026-12-01')")
+            clock.now = _time("2026-12-01T00:00:00")
+            assert v6_run.watch(paths, http, token, clock, clock.advance) == 0
+            clock.now = _time("2026-12-01T00:10:00")
+            assert v6_run.watch(paths, http, token, clock, clock.advance) == 0
+            assert v6_run.decide(paths, "00:40", http, token, None, lambda: ("a", "b"), clock, clock.advance) == 0
+        with closing(sqlite3.connect(paths.paper)) as conn:
+            slots = [slot for (slot,) in conn.execute("SELECT slot FROM valuations WHERE slot >= '2026-12-01 00:00'")]
+            decided = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        assert slots == ["2026-12-01 00:00"] and decided == 0, ("끝 시각 평가만 있어야 한다", slots, decided)
+    content, tables = _report(fixture)
+    assert content["period"]["trading_days"] == fixture["trading_days"] and content["decisions"]["slots"] == fixture["slots"], content["period"]
+    assert content["criteria"]["valuations"]["expected"] == fixture["watch_slots"] and content["verdict"] == "통과", content["criteria"]
+    fills, equity = tables["fills.csv"][1], tables["equity.csv"][1]
+    assert len(fills) == fixture["verdict"]["in_period_fills"] and fills[-1][0] == fixture["verdict"]["fills"][1]["at"], fills
+    assert equity[-1][0] == "2026-12-01 00:00" and all(row[0] != fixture["verdict"]["after_end_slot"] for row in equity), equity[-1]
+
+
+def case_run_verdict() -> None:
+    fixture = _fixture("prd04-run.json")
+    verdict = fixture["verdict"]
+    slots = list(_report(fixture)[0]["decisions"]["by_status"])
+
+    def fail_first(count: int):
+        def change(record: dict) -> None:
+            for slot in list(record["decisions"])[:count]:
+                record["decisions"][slot] = {"status": "failed", "strategy": ""}
+
+        return change
+
+    def drawdown(equity: int):
+        return lambda record: record["watch"].__setitem__("2026-11-20 12:00", [equity, 0])
+
+    def drop(count: int):
+        def change(record: dict) -> None:
+            removable = [slot for slot in record["watch"] if slot.endswith(":10")][:count]
+            for slot in removable:
+                del record["watch"][slot]
+
+        return change
+
+    checks = [
+        ("판단 실패 정확히 10%", fail_first(verdict["failures_fail"]), "failures", False),
+        ("판단 실패 10%보다 적음", fail_first(verdict["failures_pass"]), "failures", True),
+        ("최대 낙폭 정확히 20%", drawdown(verdict["drawdown_fail"]), "max_drawdown", False),
+        ("최대 낙폭 20%보다 작음", drawdown(verdict["drawdown_pass"]), "max_drawdown", True),
+        ("10분 평가 90% 이상", drop(fixture["watch_slots"] - verdict["valuations_pass"]), "valuations", True),
+        ("10분 평가 90%보다 하나 적음", drop(fixture["watch_slots"] - verdict["valuations_fail"]), "valuations", False),
+        ("00:00 평가가 빠진 날", lambda record: record["watch"].pop(verdict["missing_midnight"]), "midnight", False),
+        ("stale 평가", lambda record: record["watch"].__setitem__("2026-11-25 03:20", [500000, 1]), "stale", False),
+    ]
+    for rule, values in verdict["ledger"].items():
+        checks.append((f"장부 규칙 {rule}", lambda record, values=values: record["fills"][0].update(values), "ledger", False))
+    for name, change, key, passed in checks:
+        content, _ = _report(fixture, change)
+        assert content["criteria"][key]["passed"] is passed, (name, content["criteria"][key])
+        assert content["verdict"] == ("통과" if passed else "불통과"), (name, content["verdict"])
+    content, _ = _report(fixture, lambda record: record["calendar"]["KR"].pop(verdict["missing_calendar_day"]))
+    assert (content["decisions"]["slots"], content["decisions"]["by_status"]["missing"]) == (verdict["missing_calendar_slots"], 24), content["decisions"]
+    assert _report(fixture, now=verdict["now_before"])[0]["verdict"] is None, "끝 시각 전에 판정이 있다"
+    assert slots == list(v6_run.STATUSES), slots
+
+
+def case_run_stale() -> None:
+    fixture = _fixture("prd04-run.json")
+    stale = fixture["stale"]
+    infos = _paper_infos(stale["instruments"])
+    with tempfile.TemporaryDirectory() as name:
+        tmp = Path(name)
+        paths, clock = _run_paths(tmp, fixture), Clock(_time("2026-11-17T16:40:00"))
+        routes = {
+            "/api/v1/prices": [
+                {"body": {"result": [{"symbol": symbol, "lastPrice": price, "timestamp": at, "currency": "KRW"} for symbol, price, at in run["prices"]]}}
+                for run in stale["runs"]
+            ],
+            "/api/v1/exchange-rate": [{"body": {"result": fixture["run"]["rate"] | {"validFrom": run["validFrom"]}}} for run in stale["runs"]],
+        }
+        with _run_http(fixture, routes, clock, [], tmp) as (http, token, _, _):
+            _prepare_run(paths, http, token, clock)
+            with v6_run.ledger(paths) as conn:
+                conn.execute("INSERT OR REPLACE INTO meta VALUES ('calendar_day', '2026-11-17')")
+                v6_paper.save_instruments(conn, infos)
+                conn.execute("UPDATE cash SET amount = ? WHERE currency = 'USD'", (stale["usd"],))
+                for symbol, (quantity, average, market) in stale["positions"].items():
+                    conn.execute("INSERT INTO positions VALUES (?, ?, ?, ?, ?)", (symbol, market, infos[symbol]["currency"], quantity, average))
+                    conn.execute("INSERT INTO last_values VALUES (?, ?, ?)", (symbol, average, stale["last"]))
+                conn.execute("INSERT INTO last_values VALUES ('USDKRW', '1350.00', ?)", (stale["last"],))
+            for run in stale["runs"]:
+                clock.now = _time(run["at"])
+                assert v6_run.watch(paths, http, token, clock, clock.advance) == 0
+        with closing(sqlite3.connect(paths.paper)) as conn:
+            got = [list(row) for row in conn.execute("SELECT stale, stale_detail FROM valuations WHERE slot >= '2026-11-17 16:40' AND kind = 'watch' ORDER BY slot")]
+        assert got == [[run["stale"], run["detail"]] for run in stale["runs"]], got
+
+
+def case_run_strategies() -> None:
+    fixture = _fixture("prd04-run.json")
+    final = fixture["verdict"]["strategies"]["final"]
+    content, tables = _report(fixture, lambda record: record["watch"].__setitem__("2026-12-01 00:00", [final, 0]))
+    shares = sum(Decimal(row[3]) for row in tables["strategies.csv"][1])
+    assert shares == (Decimal(final) - v6_paper.START_CASH) / v6_paper.START_CASH, (shares, tables["strategies.csv"][1])
+    assert content["account"]["equity"] == final, content["account"]
+
+
 CASES = {
     "01": [
         (
@@ -514,6 +867,24 @@ CASES = {
             " 월요일이 아닌 날의 00:00 평가가 없으면 앞의 하루 기준으로 그날 사지 않고, 월요일 00:00 평가가 없으면 앞의 한 주 기준으로 그 주 내내 사지 않음",
             case_paper_limits,
         ),
+    ],
+    "04": [
+        ("실행: 판단 차례마다 한 번 실행, 같은 차례를 두 번 실행해도 판단·체결이 다시 생기지 않음, E가 지난 차례는 실행하지 않고 missing", case_run_decide),
+        ("매시 40분에는 손실 한도 판정 뒤에 C 평가를 만들어 그 한도가 판단의 매수를 막음", case_run_limit_first),
+        ("강제 매도와 판단 체결이 장부를 동시에 바꾸지 않음", case_run_serialized),
+        ("토스 429는 한 번만 기다려 다시 보내고 두 번째 429 뒤에는 보내지 않음", case_run_rate_limit),
+        (
+            "검증 구간: 주말·휴장일이 낀 장 운영 정보로 센 10번째 국내 거래일 다음 날 00:00이 끝 시각, 마지막 날 23:45 체결과 끝 시각 평가는 판정에 들어가고"
+            " 끝 시각 뒤에는 판단·체결·평가가 새로 생기지 않음",
+            case_run_period,
+        ),
+        (
+            "판정 경계: 판단 실패 정확히 10%·최대 낙폭 정확히 20%는 불통과, 10분 평가 90% 이상은 통과·하나 적으면 불통과, 장 운영 정보가 없는 날은 24번 missing,"
+            " 00:00 평가 누락·stale·장부 규칙 위반 다섯 가지 각각 불통과, 끝 시각 전에는 판정 없음",
+            case_run_verdict,
+        ),
+        ("stale: 거래할 수 있는 보유의 현재가·필요한 환율을 마지막으로 받은 지 20분이 넘으면 stale, 20분 안에 받았으면 응답 시각이 오래돼도 아님, 거래할 수 없는 보유는 아님", case_run_stale),
+        ("전략 이름별 pnl_krw ÷ 500,000의 합이 총수익률과 같음", case_run_strategies),
     ],
 }
 

@@ -37,6 +37,8 @@ from rt_trading import (
     v5_serve,
     v5_target,
     v6_acceptance,
+    v6_market,
+    v6_run,
     web_acceptance,
 )
 
@@ -56,6 +58,7 @@ V5_PATHS = v4_daily.Paths(
 V5_LIVE = v5_live.Paths(
     V5_PATHS, V5_DIR / "live.sqlite3", V5_DIR / "config.json", V5_DIR / "live.lock", V5_DIR / "order.lock", v5_target.PERIOD, v3_daily.HOLIDAYS
 )
+V6_PATHS = v6_run.Paths(ROOT / "data" / "v6", REPORT_DIR)
 SYMBOLS = ("069500", "114800")
 SINCE = "2022-11-23"  # 토스 국내 1분봉 제공 시작일
 
@@ -107,6 +110,10 @@ def main() -> None:
     v5_serve_args.add_argument("--host", default="127.0.0.1")
     v6_checks = commands.add_parser("v6-acceptance", help="v6 acceptance를 네트워크 없이 실행한다")
     v6_checks.add_argument("--prd", choices=sorted(v6_acceptance.CASES))
+    v6_decide = commands.add_parser("v6-decide", help="v6 판단 한 번: 입력 마감까지 받아 판단하고 체결 시각 뒤에 모의 체결한다")
+    v6_decide.add_argument("--at", required=True, help="판단 차례 HH:40")
+    commands.add_parser("v6-watch", help="v6 10분 평가, 손실 한도와 강제 매도 한 번")
+    commands.add_parser("v6-report", help="v6 보고서와, 검증 구간이 끝났으면 판정")
     args = parser.parse_args()
     if args.command == "fetch":
         sys.exit(fetch())
@@ -144,6 +151,8 @@ def main() -> None:
         sys.exit(v5_acceptance.run(args.prd))
     if args.command == "v6-acceptance":
         sys.exit(v6_acceptance.run(args.prd))
+    if args.command in ("v6-decide", "v6-watch", "v6-report"):
+        sys.exit(run_v6(args.command, getattr(args, "at", None)))
     if args.command == "v5-daily":
         sys.exit(run_v5_daily())
     if args.command == "v5-decide":
@@ -167,6 +176,24 @@ def fetch() -> int:
 def fetch_us() -> int:
     with httpx.Client(base_url=toss.BASE_URL, timeout=30) as http:
         return v3_us.run(http, toss.read_credentials(ROOT), V3_PATHS.us, lambda: datetime.now(toss.KST), shared_token(http))
+
+
+def run_v6(command: str, at: str | None) -> int:
+    """v6-decide·v6-watch·v6-report. 토스 호출은 서버의 함께 쓰는 토큰을 쓴다."""
+    clock = lambda: datetime.now(toss.KST)
+    if command == "v6-report":
+        return v6_run.report(V6_PATHS, clock)
+    try:
+        toss.read_credentials(ROOT)
+    except KeyError as error:
+        print(f"V1_TOSS_CREDENTIALS_MISSING: .env나 환경 변수에 {error}가 없다")
+        return 1
+    with httpx.Client(base_url=toss.BASE_URL, timeout=v6_market.TIMEOUT) as http:
+        token = shared_token(http)
+        if command == "v6-watch":
+            return v6_run.watch(V6_PATHS, http, token, clock, time.sleep)
+        credentials = lambda: codex.credentials(codex.TOKEN_DIR)
+        return v6_run.decide(V6_PATHS, at, http, token, v4_news.read_credentials(ROOT), credentials, clock, time.sleep)
 
 
 def shared_token(http: httpx.Client) -> toss.SharedToken:

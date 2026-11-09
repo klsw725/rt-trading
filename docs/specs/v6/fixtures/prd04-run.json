@@ -1,0 +1,67 @@
+{
+  "calendar": {
+    "first": "2026-11-12",
+    "last": "2026-12-02",
+    "kr_days": ["2026-11-12", "2026-11-13", "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27", "2026-11-30", "2026-12-01", "2026-12-02"],
+    "us_days": ["2026-11-12", "2026-11-13", "2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27", "2026-11-30", "2026-12-01", "2026-12-02"]
+  },
+  "start": "2026-11-16",
+  "end": "2026-12-01T00:00:00+09:00",
+  "trading_days": ["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-26", "2026-11-27", "2026-11-30"],
+  "slots": 260,
+  "watch_slots": 2161,
+  "run": {
+    "codex_token": {"access": "V6-RUN-ACCESS-11", "refresh": "V6-RUN-REFRESH-22", "account_id": "V6-RUN-ACCOUNT-33"},
+    "stocks": [
+      ["100001", "가상주식1", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, true, false, false]],
+      ["100002", "가상주식2", "KOSPI", "STOCK", "ACTIVE", "KRW", null, [false, false, false, null]],
+      ["UST1", "가상미국1", "NASDAQ", "STOCK", "ACTIVE", "USD", null, null]
+    ],
+    "rankings": {"KR": [[1, "100001", "0.01"]], "US": [[1, "UST1", "0.02"]]},
+    "rate": {"rate": "1350.50", "midRate": "1350.00", "validFrom": "2026-11-17T10:39:00+09:00", "validUntil": "2026-11-17T10:44:00+09:00"},
+    "reply": "{\"positions\": [{\"symbol\": \"100001\", \"weight\": 0.2}], \"strategy\": \"추세\", \"reason\": \"이유\", \"notes\": \"노트\"}",
+    "book": {"timestamp": "2026-11-17T10:45:00+09:00", "currency": "KRW", "asks": [{"price": "10000", "volume": "6"}], "bids": [{"price": "9990", "volume": "100"}]},
+    "expected_fill": {"symbol": "100001", "side": "BUY", "quantity": 6, "amount": "60000", "commission": "9", "krw_after": "439991"},
+    "limit": {"price": "4000", "quantity": 100, "average": "5000", "reasons": ["daily_limit", "weekly_limit", "cumulative_limit", "forced_sale"]}
+  },
+  "stale": {
+    "positions": {"100001": [1, "10000", "KR"], "200001": [1, "10000", "KR"], "UST1": [1, "20.00", "US"]},
+    "usd": "10.00",
+    "last": "2026-11-17T10:15:00+09:00",
+    "instruments": [["100001", "KR", "STOCK", "", 1], ["200001", "KR", "STOCK", "", 0], ["UST1", "US", "STOCK", "", 0]],
+    "runs": [
+      {"at": "2026-11-17T16:40:00", "prices": [["100001", "10100", "2026-11-17T15:00:00+09:00"], ["UST1", "20.10", "2026-11-17T16:39:59+09:00"]], "validFrom": "2026-11-15T09:00:00+09:00", "stale": 0, "detail": ""},
+      {"at": "2026-11-17T16:50:00", "prices": [["UST1", "20.10", "2026-11-17T16:49:59+09:00"]], "validFrom": "2026-11-15T09:00:00+09:00", "stale": 0, "detail": ""},
+      {"at": "2026-11-17T17:00:00", "prices": [["UST1", "20.10", "2026-11-17T16:59:59+09:00"]], "validFrom": "2026-11-15T09:00:00+09:00", "stale": 0, "detail": ""},
+      {"at": "2026-11-17T17:10:00", "prices": [["UST1", "20.10", "2026-11-17T17:09:59+09:00"]], "validFrom": "2026-11-15T09:00:00+09:00", "stale": 1, "detail": "100001"}
+    ]
+  },
+  "verdict": {
+    "now_after": "2026-12-01T10:00:00",
+    "now_before": "2026-11-30T12:00:00",
+    "fills": [
+      {"at": "2026-11-17T10:45:00+09:00", "turn": "2026-11-17 10:40"},
+      {"at": "2026-11-30T23:45:00+09:00", "turn": "2026-11-30 23:40"},
+      {"at": "2026-12-01T00:05:00+09:00", "turn": "2026-12-01 00:00"}
+    ],
+    "in_period_fills": 2,
+    "after_end_slot": "2026-12-01 00:10",
+    "failures_fail": 26,
+    "failures_pass": 25,
+    "drawdown_fail": 400000,
+    "drawdown_pass": 400001,
+    "valuations_pass": 1945,
+    "valuations_fail": 1944,
+    "missing_calendar_day": "2026-11-22",
+    "missing_calendar_slots": 284,
+    "missing_midnight": "2026-11-18 00:00",
+    "ledger": {
+      "negative_cash": {"krw_after": "-1"},
+      "over_five": {"holdings_after": 6},
+      "ineligible_buy": {"eligible": 0},
+      "untradable_fill": {"tradable": 0},
+      "blocked_buy": {"blocked": 1}
+    },
+    "strategies": {"names": ["추세", "역추세"], "step": 100, "final": 526050}
+  }
+}
