@@ -786,6 +786,17 @@ def case_run_verdict() -> None:
     assert (content["decisions"]["slots"], content["decisions"]["by_status"]["missing"]) == (verdict["missing_calendar_slots"], 24), content["decisions"]
     assert _report(fixture, now=verdict["now_before"])[0]["verdict"] is None, "끝 시각 전에 판정이 있다"
     assert slots == list(v6_run.STATUSES), slots
+    mid, expected = _time(verdict["now_mid"]), verdict["mid"]
+
+    def until(record: dict) -> None:
+        record["decisions"] = {slot: item for slot, item in record["decisions"].items() if v6_head.times(slot)[2] <= mid}
+        record["watch"] = {slot: item for slot, item in record["watch"].items() if _time(slot.replace(" ", "T") + ":00") <= mid}
+        record["fills"] = [fill for fill in record["fills"] if datetime.fromisoformat(fill["at"]) <= mid]
+
+    content, _ = _report(fixture, until, now=verdict["now_mid"])
+    valuations, midnight = content["criteria"]["valuations"], content["criteria"]["midnight"]
+    assert content["verdict"] is None and (content["decisions"]["slots"], content["decisions"]["by_status"]["missing"]) == (expected["slots"], 0), content["decisions"]
+    assert (valuations["recorded"], valuations["expected"], midnight["missing"]) == (expected["valuations"], expected["valuations"], []), (valuations, midnight)
 
 
 def case_run_stale() -> None:
@@ -1005,7 +1016,7 @@ CASES = {
         ),
         (
             "판정 경계: 판단 실패 정확히 10%·최대 낙폭 정확히 20%는 불통과, 10분 평가 90% 이상은 통과·하나 적으면 불통과, 장 운영 정보가 없는 날은 24번 missing,"
-            " 00:00 평가 누락·stale·장부 규칙 위반 다섯 가지 각각 불통과, 끝 시각 전에는 판정 없음",
+            " 00:00 평가 누락·stale·장부 규칙 위반 다섯 가지 각각 불통과, 끝 시각 전에는 판정 없이 지금까지 지난 차례만 셈",
             case_run_verdict,
         ),
         ("stale: 거래할 수 있는 보유의 현재가·필요한 환율을 마지막으로 받은 지 20분이 넘으면 stale, 20분 안에 받았으면 응답 시각이 오래돼도 아님, 거래할 수 없는 보유는 아님", case_run_stale),

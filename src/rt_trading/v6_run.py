@@ -475,14 +475,14 @@ def build(paths: Paths, now: datetime) -> tuple[dict, dict[str, tuple[tuple, lis
         positions = conn.execute("SELECT symbol, quantity, avg_price FROM positions ORDER BY symbol").fetchall()
         cash = dict(conn.execute("SELECT currency, amount FROM cash"))
         calendar = v6_market.load_calendar(paths.calendar)
-    days = _days(start, end)
-    slots = [f"{day} {clock}" for day in days for clock, _ in v6_market.slots(calendar, day)]
+    days, upto = _days(start, end), min(now, end)
+    slots = [f"{day} {clock}" for day in days for clock, _ in v6_market.slots(calendar, day) if v6_market.fill_time(day, clock) <= upto]
     statuses = {slot: decisions[slot]["status"] if slot in decisions else "missing" for slot in slots}
     watch = [row for row in valuations if row[1] == "watch" and begin <= _slot_time(row[0]) <= end]
     in_period = [fill for fill in fills if begin <= datetime.fromisoformat(fill["at"]) <= end]
     last = watch[-1] if watch else None
     final = last[3] if last else v6_paper.START_CASH
-    criteria = _criteria(slots, statuses, watch, in_period, days, begin, end)
+    criteria = _criteria(slots, statuses, watch, in_period, days, begin, upto)
     ended = now >= end
     verdict = ("통과" if all(item["passed"] for item in criteria.values()) else "불통과") if ended else None
     c_equity = {row[0]: row[3] for row in valuations if row[1] == "c"}
@@ -520,19 +520,19 @@ def build(paths: Paths, now: datetime) -> tuple[dict, dict[str, tuple[tuple, lis
 
 
 def _criteria(
-    slots: list[str], statuses: dict[str, str], watch: list[tuple], fills: list[dict], days: list[str], begin: datetime, end: datetime
+    slots: list[str], statuses: dict[str, str], watch: list[tuple], fills: list[dict], days: list[str], begin: datetime, upto: datetime
 ) -> dict[str, dict]:
-    """SPEC 6절 여섯 항목의 값과 통과 여부."""
+    """SPEC 6절 여섯 항목의 값과 통과 여부. upto(지금과 끝 시각 중 이른 쪽)까지 지난 차례만 센다."""
     failed = sum(status != "ok" for status in statuses.values())
     peak, worst, breached = v6_paper.START_CASH, Decimal(0), False
     for row in watch:
         peak = max(peak, row[3])
         worst = max(worst, 1 - Decimal(row[3]) / peak)
         breached = breached or (peak - row[3]) * 5 >= peak
-    expected = int((end - begin) / SLOT) + 1
+    expected = int((upto - begin) / SLOT) + 1 if upto >= begin else 0
     recorded = len({row[0] for row in watch})
     names = {row[0] for row in watch}
-    midnights = [day for day in days[1:] if f"{day} 00:00" not in names]
+    midnights = [day for day in days[1:] if _midnight(day) <= upto and f"{day} 00:00" not in names]
     stale = sum(row[7] for row in watch)
     ledger_rules = {
         "negative_cash": sum(Decimal(fill["krw_after"]) < 0 or Decimal(fill["usd_after"]) < 0 for fill in fills),
